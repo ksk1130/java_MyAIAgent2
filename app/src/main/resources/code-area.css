@@ -1,0 +1,31 @@
+.code-area {
+    -fx-font-size: 12;
+    -fx-font-family: 'Courier New';
+    -fx-text-fill: #333333;
+}
+
+.code-area:focused {
+    -fx-control-inner-background: #FFFFFF;
+}
+
+.code-area .text {
+    -fx-text-fill: #333333;
+}
+
+.keyword {
+    -fx-text-fill: #0000CC;
+    -fx-font-weight: bold;
+}
+
+.string {
+    -fx-text-fill: #CC0000;
+}
+
+.comment {
+    -fx-text-fill: #008000;
+    -fx-font-style: italic;
+}
+
+.number {
+    -fx-text-fill: #FF6600;
+}

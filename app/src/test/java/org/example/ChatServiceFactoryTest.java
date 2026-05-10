@@ -1,0 +1,34 @@
+package org.example;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import java.util.HashMap;
+import java.util.Map;
+
+import org.junit.Test;
+
+public class ChatServiceFactoryTest {
+    @Test
+    public void createFromEnvReturnsStubWhenApiKeyMissing() {
+        ChatService service = ChatServiceFactory.createFromEnv(Map.of());
+
+        assertTrue(service instanceof StubChatService);
+    }
+
+    @Test
+    public void createFromEnvReturnsOpenAiServiceWhenApiKeyExists() {
+        Map<String, String> env = new HashMap<>();
+        env.put(ChatServiceFactory.ENV_API_KEY, "test-key");
+
+        ChatService service = ChatServiceFactory.createFromEnv(env);
+
+        assertTrue(service instanceof OpenAiCompatibleChatService);
+    }
+
+    @Test
+    public void normalizeBaseUrlRemovesTrailingSlash() {
+        assertEquals("https://example.test/v1", ChatServiceFactory.normalizeBaseUrl("https://example.test/v1/"));
+        assertEquals("https://example.test/v1", ChatServiceFactory.normalizeBaseUrl(" https://example.test/v1 "));
+    }
+}
