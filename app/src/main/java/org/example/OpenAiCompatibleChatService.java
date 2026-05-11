@@ -3,6 +3,8 @@ package org.example;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
@@ -137,7 +139,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             LocalCommandTool localCommandTool) {
         
         // LangChain4j ChatModel を構築
-        OpenAiChatModel chatModel = OpenAiChatModel.builder()
+        ChatModel chatModel = OpenAiChatModel.builder()
             .baseUrl(baseUrl)
             .apiKey(apiKey)
             .modelName(modelName)
@@ -145,7 +147,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             .build();
 
         // LangChain4j StreamingChatModel を構築
-        OpenAiStreamingChatModel streamingChatModel = OpenAiStreamingChatModel.builder()
+        StreamingChatModel streamingChatModel = OpenAiStreamingChatModel.builder()
             .baseUrl(baseUrl)
             .apiKey(apiKey)
             .modelName(modelName)
