@@ -103,17 +103,22 @@ public class WorkspaceGrepTool {
     }
 
     private void collectFileMatches(Path file, String needle, String excludeNeedle, List<String> results) {
-        List<String> lines;
+        List<String> lines = null;
+        // まずUTF-8で試行、失敗時はShift_JIS(CP932/Windows-31J)で再試行
         try {
             lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-        } catch (IOException | RuntimeException e) {
-            return;
+        } catch (IOException | RuntimeException e1) {
+            try {
+                lines = Files.readAllLines(file, java.nio.charset.Charset.forName("Windows-31J"));
+            } catch (IOException | RuntimeException e2) {
+                // どちらも失敗した場合はスキップ
+                return;
+            }
         }
 
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i);
             String lineLower = line.toLowerCase(Locale.ROOT);
-            
             // 検索パターンを含む か つ 除外パターンを含まない行を取得
             if (lineLower.contains(needle)) {
                 if (excludeNeedle == null || !lineLower.contains(excludeNeedle)) {

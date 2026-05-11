@@ -3,12 +3,28 @@ package org.example;
 import static org.junit.Assert.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.Test;
 
 public class WorkspaceGrepToolTest {
+    @Test
+    public void searchFindsMatchesInShiftJisFiles() throws Exception {
+        Path tempDir = Files.createTempDirectory("workspace-grep-sjis");
+        Files.createDirectories(tempDir.resolve("src"));
+        // SJISで「あいうえお」を含むファイルを作成
+        String sjisText = "1行目\nあいうえおを含む行\n3行目\n";
+        Path sjisFile = tempDir.resolve("src/sjis.txt");
+        Files.write(sjisFile, sjisText.getBytes(Charset.forName("Windows-31J")));
+
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        String result = grepTool.search("あいうえお");
+
+        assertTrue(result.startsWith("(tool:grep) 1件"));
+        assertTrue(result.contains("sjis.txt:2 | あいうえおを含む行"));
+    }
     @Test
     public void searchFindsMatchesInWorkspaceFiles() throws Exception {
         Path tempDir = Files.createTempDirectory("workspace-grep");
