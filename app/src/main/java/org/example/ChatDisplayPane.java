@@ -9,6 +9,7 @@ import javafx.scene.layout.VBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.text.Font;
 import javafx.scene.text.Text;
+import javafx.scene.paint.Color;
 import javafx.scene.text.TextFlow;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -67,8 +68,10 @@ public class ChatDisplayPane extends VBox {
 
     public ChatDisplayPane() {
         this.contentBox = new VBox();
-        this.contentBox.setPadding(new Insets(8));
-        this.contentBox.setSpacing(8);
+        // 全体のパディングを小さくして上下の余白を詰める
+        this.contentBox.setPadding(new Insets(4));
+        // ラベル行を分離描画しても会話行間が広がらないように最小化
+        this.contentBox.setSpacing(0);
         this.contentBox.setStyle("-fx-control-inner-background: #FFFFFF;");
 
         this.scrollPane = new ScrollPane(contentBox);
@@ -111,6 +114,12 @@ public class ChatDisplayPane extends VBox {
         contentBox.getChildren().clear();
         this.currentTranscript = transcript != null ? transcript : "";
 
+        // 不可視制御文字（ゼロ幅スペースやBOMなど）があるとTextノードの分割で
+        // 一文字だけ別のレンダリングになるケースがあるため、表示前に除去する。
+        String sanitized = this.currentTranscript.replaceAll("[\uFEFF\u200B\u200C\u200D]", "");
+        // その他の制御文字も念のため除去（改行は保持）
+        sanitized = sanitized.replaceAll("[\\p{Cc}&&[^\\r\\n\\t]]", "");
+
         if (transcript == null || transcript.isEmpty()) {
             TextFlow emptyFlow = new TextFlow();
             Text placeholder = new Text("（会話履歴はまだありません）");
@@ -121,7 +130,7 @@ public class ChatDisplayPane extends VBox {
         }
 
         // 行ごとに処理
-        String[] lines = transcript.split("\n", -1);
+        String[] lines = sanitized.split("\n", -1);
         TextFlow currentFlow = new TextFlow();
         currentFlow.setStyle("-fx-wrap-text: true;");
         
@@ -144,6 +153,14 @@ public class ChatDisplayPane extends VBox {
                 // BEGIN 直後から END マーカーまでをツール内容として収集
                 while (i < lines.length && !isToolBlockEndLine(lines[i])) {
                     String nextLine = lines[i];
+                    // END マーカーが欠損している履歴でも、通常の会話ラベル行に到達したら
+                    // ツール折り畳みを終了して Assistant 本文を巻き込まない。
+                    if (nextLine.matches("^(You|Assistant):.*")
+                            && !isToolResultLine(nextLine)
+                            && !isToolBlockBeginLine(nextLine)
+                            && !isToolBlockEndLine(nextLine)) {
+                        break;
+                    }
                     if (!toolNameResolved && isToolResultLine(nextLine)) {
                         toolName = extractToolName(nextLine);
                         toolNameResolved = true;
@@ -151,7 +168,7 @@ public class ChatDisplayPane extends VBox {
                     if (!toolContent.isEmpty()) {
                         toolContent.append("\n");
                     }
-                    toolContent.append(nextLine);
+                    toolContent.append(stripChatLabelPrefix(nextLine));
                     i++;
                 }
 
@@ -181,7 +198,7 @@ public class ChatDisplayPane extends VBox {
                 String toolName = extractToolName(line);
                 
                 // 最初の行（📌 で始まる行）を追加
-                toolContent.append(line);
+                toolContent.append(stripChatLabelPrefix(line));
                 i++;
                 
                 // 後続行を収集（次のツール結果マーカーか通常テキストまで）
@@ -197,7 +214,7 @@ public class ChatDisplayPane extends VBox {
                             && !isLikelyToolContinuationLine(lines[i + 1])) {
                         break;
                     }
-                    toolContent.append("\n").append(nextLine);
+                    toolContent.append("\n").append(stripChatLabelPrefix(nextLine));
                     i++;
                 }
                 
@@ -209,15 +226,30 @@ public class ChatDisplayPane extends VBox {
                 currentFlow = new TextFlow();
                 currentFlow.setStyle("-fx-wrap-text: true;");
             } else {
+                // ラベル行（You:/Assistant:）は TextFlow を分離し、前行スタイルの影響を遮断する。
+                boolean isLabelLine = line.matches("^(You|Assistant):.*");
+                if (isLabelLine && !currentFlow.getChildren().isEmpty()) {
+                    contentBox.getChildren().add(currentFlow);
+                    currentFlow = new TextFlow();
+                    currentFlow.setStyle("-fx-wrap-text: true;");
+                }
+
                 // 通常行をハイライト
                 highlightLine(currentFlow, line);
-                
+
                 // 改行を追加
                 if (i < lines.length - 1) {
                     Text newline = new Text("\n");
                     newline.setFont(DEFAULT_FONT);
                     currentFlow.getChildren().add(newline);
                 }
+
+                if (isLabelLine) {
+                    contentBox.getChildren().add(currentFlow);
+                    currentFlow = new TextFlow();
+                    currentFlow.setStyle("-fx-wrap-text: true;");
+                }
+
                 i++;
             }
         }
@@ -269,6 +301,16 @@ public class ChatDisplayPane extends VBox {
             return "";
         }
         return line.replaceFirst("^Assistant:\\s+", "");
+    }
+
+    /**
+     * 折り畳み表示用: 先頭の会話ラベル（You:/Assistant:）を取り除く。
+     */
+    private String stripChatLabelPrefix(String line) {
+        if (line == null) {
+            return "";
+        }
+        return line.replaceFirst("^(You|Assistant):\\s+", "");
     }
 
     private boolean isToolBlockBeginLine(String line) {
@@ -353,29 +395,67 @@ public class ChatDisplayPane extends VBox {
             
             Text labelText = new Text(labelWithColon);
             labelText.setFont(DEFAULT_FONT);
-            labelText.setStyle(getStyleWithFont(color));
+            labelText.setFill(Color.web(color));
             target.getChildren().add(labelText);
             
             // 残りのテキストをハイライト（ツール出力も含む）
             String remaining = line.substring(labelMatcher.end());
             highlightWithToolMarkers(target, remaining);
         } else {
-            // ラベルなし、コメント検出（// 以降）
+            // ラベルなし行。コメント（//）で分割し、コードっぽい行は従来どおりシンタックスハイライト、
+            // 文章っぽい行は Markdown としてパースしてレンダリングする。
             int commentIndex = line.indexOf("//");
-            String codePart = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
+            String beforeComment = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
             String commentPart = commentIndex >= 0 ? line.substring(commentIndex) : "";
 
-            // コード部分をハイライト
-            highlightCode(target, codePart);
-
-            // コメント部分を追加
-            if (!commentPart.isEmpty()) {
-                Text commentText = new Text(commentPart);
-                commentText.setFont(DEFAULT_FONT);
-                commentText.setStyle(getStyleWithFont(COLOR_COMMENT));
-                target.getChildren().add(commentText);
+            if (looksLikeCode(beforeComment)) {
+                // コードっぽい行は従来ロジックで処理
+                highlightCode(target, beforeComment);
+                if (!commentPart.isEmpty()) {
+                            Text commentText = new Text(commentPart);
+                            commentText.setFont(DEFAULT_FONT);
+                            commentText.setFill(Color.web(COLOR_COMMENT));
+                    target.getChildren().add(commentText);
+                }
+            } else {
+                // 文章っぽい行は Markdown パーサで処理
+                for (javafx.scene.text.Text t : MarkdownFormatter.parseMarkdownLine(line)) {
+                    t.setFont(DEFAULT_FONT);
+                    target.getChildren().add(t);
+                }
             }
         }
+    }
+
+    /**
+     * 行がコードっぽいかどうかを簡易判定する。シンボルやキーワード、セミコロンなどが含まれる場合
+     * はコードとみなす。リスト（- / * / 数字.）や引用（>）は文章扱いにする。
+     */
+    private boolean looksLikeCode(String s) {
+        if (s == null) return false;
+        String trimmed = s.strip();
+        if (trimmed.isEmpty()) return false;
+
+        // 明らかにリストや引用のパターンは文章扱い
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("> ")
+                || trimmed.matches("^\\d+\\.\\s+.*")) {
+            return false;
+        }
+
+        // ファイル差分やツール出力の可能性が高い先頭記号はコード扱い
+        if (trimmed.startsWith("$") || trimmed.startsWith("|") || trimmed.startsWith("\t")
+                || trimmed.startsWith("A\t") || trimmed.startsWith("M\t") || trimmed.startsWith("D\t")) {
+            return true;
+        }
+
+        // コードでよく見られるトークン
+        String[] codeTokens = new String[]{";","{","}","(",")","=","->","=>","import ","class ","public ","private ","protected ","static ","final ","package ","//"};
+        for (String tok : codeTokens) {
+            if (trimmed.contains(tok)) return true;
+        }
+
+        // 小文字主体で記号が少ない場合は文章とみなす
+        return false;
     }
     
     /**
@@ -397,15 +477,19 @@ public class ChatDisplayPane extends VBox {
             String toolMarker = toolMatcher.group();
             Text toolText = new Text(toolMarker);
             toolText.setFont(DEFAULT_FONT);
-            toolText.setStyle(getStyleWithFont(COLOR_LABEL_TOOL));
+            toolText.setFill(Color.web(COLOR_LABEL_TOOL));
             target.getChildren().add(toolText);
             
             lastEnd = toolMatcher.end();
         }
         
-        // 残りのテキストをハイライト
+        // 残りのテキストを Markdown パーサで処理して追加
         if (lastEnd < text.length()) {
-            highlightCode(target, text.substring(lastEnd));
+            String tail = text.substring(lastEnd);
+            for (javafx.scene.text.Text t : MarkdownFormatter.parseMarkdownLine(tail)) {
+                t.setFont(DEFAULT_FONT);
+                target.getChildren().add(t);
+            }
         }
     }
     
@@ -461,7 +545,7 @@ public class ChatDisplayPane extends VBox {
                 if (lastEnd < code.length()) {
                     Text textNode = new Text(code.substring(lastEnd));
                     textNode.setFont(DEFAULT_FONT);
-                    textNode.setStyle(getStyleWithFont(COLOR_TEXT));
+                    textNode.setFill(Color.web(COLOR_TEXT));
                     target.getChildren().add(textNode);
                 }
                 break;
@@ -471,7 +555,7 @@ public class ChatDisplayPane extends VBox {
             if (lastEnd < nextStart) {
                 Text textNode = new Text(code.substring(lastEnd, nextStart));
                 textNode.setFont(DEFAULT_FONT);
-                textNode.setStyle(getStyleWithFont(COLOR_TEXT));
+                textNode.setFill(Color.web(COLOR_TEXT));
                 target.getChildren().add(textNode);
             }
 
@@ -482,7 +566,7 @@ public class ChatDisplayPane extends VBox {
                     String token = m.group();
                     Text tokenNode = new Text(token);
                     tokenNode.setFont(DEFAULT_FONT);
-                    tokenNode.setStyle(getStyleWithFont(COLOR_STRING));
+                    tokenNode.setFill(Color.web(COLOR_STRING));
                     target.getChildren().add(tokenNode);
                     lastEnd = nextStart + token.length();
                 } else {
@@ -494,7 +578,7 @@ public class ChatDisplayPane extends VBox {
                     String token = m.group();
                     Text tokenNode = new Text(token);
                     tokenNode.setFont(DEFAULT_FONT);
-                    tokenNode.setStyle(getStyleWithFont(COLOR_KEYWORD));
+                    tokenNode.setFill(Color.web(COLOR_KEYWORD));
                     target.getChildren().add(tokenNode);
                     lastEnd = nextStart + token.length();
                 } else {
@@ -506,7 +590,7 @@ public class ChatDisplayPane extends VBox {
                     String token = m.group();
                     Text tokenNode = new Text(token);
                     tokenNode.setFont(DEFAULT_FONT);
-                    tokenNode.setStyle(getStyleWithFont(COLOR_NUMBER));
+                    tokenNode.setFill(Color.web(COLOR_NUMBER));
                     target.getChildren().add(tokenNode);
                     lastEnd = nextStart + token.length();
                 } else {
