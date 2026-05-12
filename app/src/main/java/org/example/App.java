@@ -390,6 +390,7 @@ public class App extends Application {
         // 全コピーボタン：現在の会話履歴をクリップボードにコピー
         Button copyAllButton = new Button("全コピー");
         copyAllButton.setOnAction(event -> chatHistory.copyToClipboard());
+        // 最新ターンコピーボタンは不要になったため、単に全コピーボタンのみ表示
         topBar.getChildren().add(copyAllButton);
 
         Region spacer = new Region();

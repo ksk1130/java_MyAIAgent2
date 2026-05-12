@@ -3,6 +3,10 @@ package org.example;
 import javafx.geometry.Insets;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TitledPane;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.animation.PauseTransition;
+import javafx.util.Duration;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.VBox;
@@ -13,6 +17,9 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.TextFlow;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
 
 /**
  * チャット履歴を表示する UI コンポーネント。
@@ -28,6 +35,12 @@ public class ChatDisplayPane extends VBox {
     private final ScrollPane scrollPane;
     /** クリップボードコピー用にプレーンテキストを保持 */
     private String currentTranscript = "";
+    /** 会話ターン（ラベル行を起点にしたまとまり）を保持する */
+    private final List<String> turns = new ArrayList<>();
+    // 現在ハイライト表示しているターンのインデックス（-1 = なし）
+    private int highlightedTurnIndex = -1;
+    // ハイライト解除用タイマー
+    private PauseTransition clearHighlightTimer = null;
 
     // フォント設定（ここで変更可能）
     private static final String FONT_FAMILY = "Consolas";  // Courier New / Consolas / Menlo / Monaco
@@ -120,6 +133,9 @@ public class ChatDisplayPane extends VBox {
         // その他の制御文字も念のため除去（改行は保持）
         sanitized = sanitized.replaceAll("[\\p{Cc}&&[^\\r\\n\\t]]", "");
 
+        // ターン情報を先に構築しておく（表示に依存しない安定したコピー用）
+        buildTurns(sanitized);
+
         if (transcript == null || transcript.isEmpty()) {
             TextFlow emptyFlow = new TextFlow();
             Text placeholder = new Text("（会話履歴はまだありません）");
@@ -129,138 +145,244 @@ public class ChatDisplayPane extends VBox {
             return;
         }
 
-        // 行ごとに処理
-        String[] lines = sanitized.split("\n", -1);
-        TextFlow currentFlow = new TextFlow();
-        currentFlow.setStyle("-fx-wrap-text: true;");
-        
-        int i = 0;
-        while (i < lines.length) {
-            String line = lines[i];
+        // ターン単位でレンダリングし、それぞれに右クリックでコピーするメニューを追加
+        for (int ti = 0; ti < turns.size(); ti++) {
+            String turn = turns.get(ti);
+            VBox turnBox = new VBox();
+            turnBox.setPadding(new Insets(4, 0, 4, 0));
+            turnBox.setSpacing(0);
 
-            // 明示マーカー方式: 開始〜終了マーカーの区間をツール結果として扱う
-            if (isToolBlockBeginLine(line)) {
-                // BEGIN マーカー行までの currentFlow を追加（BEGIN 行自体は含めない）
-                if (!currentFlow.getChildren().isEmpty()) {
-                    contentBox.getChildren().add(currentFlow);
-                }
+            // ContextMenu: このターンをコピー
+            ContextMenu cm = new ContextMenu();
+            MenuItem copyItem = new MenuItem("このターンをコピー");
+            final int idx = ti;
+            copyItem.setOnAction(evt -> {
+                copyTurnToClipboard(idx);
+                highlightTurnSelection(idx);
+            });
+            cm.getItems().add(copyItem);
+            turnBox.setOnContextMenuRequested(evt -> cm.show(turnBox, evt.getScreenX(), evt.getScreenY()));
 
-                StringBuilder toolContent = new StringBuilder();
-                String toolName = "tool";
-                boolean toolNameResolved = false;
-                i++; // BEGIN マーカー行をスキップ
+            // ターン内部を行毎にレンダリング（ツールブロックやツール結果は既存ヘルパを流用）
+            String[] tlines = turn.split("\n", -1);
+            TextFlow currentFlow = new TextFlow();
+            currentFlow.setStyle("-fx-wrap-text: true;");
 
-                // BEGIN 直後から END マーカーまでをツール内容として収集
-                while (i < lines.length && !isToolBlockEndLine(lines[i])) {
-                    String nextLine = lines[i];
-                    // END マーカーが欠損している履歴でも、通常の会話ラベル行に到達したら
-                    // ツール折り畳みを終了して Assistant 本文を巻き込まない。
-                    if (nextLine.matches("^(You|Assistant):.*")
-                            && !isToolResultLine(nextLine)
-                            && !isToolBlockBeginLine(nextLine)
-                            && !isToolBlockEndLine(nextLine)) {
-                        break;
+            int j = 0;
+            while (j < tlines.length) {
+                String line = tlines[j];
+                if (isToolBlockBeginLine(line)) {
+                    if (!currentFlow.getChildren().isEmpty()) {
+                        turnBox.getChildren().add(currentFlow);
                     }
-                    if (!toolNameResolved && isToolResultLine(nextLine)) {
-                        toolName = extractToolName(nextLine);
-                        toolNameResolved = true;
+                    StringBuilder toolContent = new StringBuilder();
+                    String toolName = "tool";
+                    boolean toolNameResolved = false;
+                    j++;
+                    while (j < tlines.length && !isToolBlockEndLine(tlines[j])) {
+                        String nextLine = tlines[j];
+                        if (!toolNameResolved && isToolResultLine(nextLine)) {
+                            toolName = extractToolName(nextLine);
+                            toolNameResolved = true;
+                        }
+                        if (!toolContent.isEmpty()) toolContent.append("\n");
+                        toolContent.append(stripChatLabelPrefix(nextLine));
+                        j++;
                     }
-                    if (!toolContent.isEmpty()) {
-                        toolContent.append("\n");
-                    }
-                    toolContent.append(stripChatLabelPrefix(nextLine));
-                    i++;
-                }
-
-                // END マーカー行をスキップ
-                if (i < lines.length && isToolBlockEndLine(lines[i])) {
-                    i++;
-                }
-
-                // END 後、続く初期応答（Assistant: ラベル）は currentFlow に追加する（新しいFlow開始）
-                TitledPane toolPane = createToolPane(toolName, toolContent.toString());
-                contentBox.getChildren().add(toolPane);
-
-                currentFlow = new TextFlow();
-                currentFlow.setStyle("-fx-wrap-text: true;");
-                continue;
-            }
-            
-            // ツール実行結果の開始判定：📌 で始まる行
-            if (isToolResultLine(line)) {
-                // 現在の TextFlow を contentBox に追加
-                if (!currentFlow.getChildren().isEmpty()) {
-                    contentBox.getChildren().add(currentFlow);
-                }
-                
-                // ツール結果のすべての行を収集（次のツール結果または通常テキストまで）
-                StringBuilder toolContent = new StringBuilder();
-                String toolName = extractToolName(line);
-                
-                // 最初の行（📌 で始まる行）を追加
-                toolContent.append(stripChatLabelPrefix(line));
-                i++;
-                
-                // 後続行を収集（次のツール結果マーカーか通常テキストまで）
-                while (i < lines.length) {
-                    String nextLine = lines[i];
-                    // 次のツール結果マーカーか、通常テキスト（チャットラベル）が出現したら終了
-                    if (isToolResultLine(nextLine) || nextLine.matches("^(You|Assistant):.*")) {
-                        break;
-                    }
-                    // 空行の次が自然文なら、ツール結果の終了とみなす
-                    if (nextLine.trim().isEmpty() && i + 1 < lines.length
-                            && !isToolResultLine(lines[i + 1])
-                            && !isLikelyToolContinuationLine(lines[i + 1])) {
-                        break;
-                    }
-                    toolContent.append("\n").append(stripChatLabelPrefix(nextLine));
-                    i++;
-                }
-                
-                // TitledPane を作成して追加
-                TitledPane toolPane = createToolPane(toolName, toolContent.toString());
-                contentBox.getChildren().add(toolPane);
-                
-                // 新しい TextFlow を作成
-                currentFlow = new TextFlow();
-                currentFlow.setStyle("-fx-wrap-text: true;");
-            } else {
-                // ラベル行（You:/Assistant:）は TextFlow を分離し、前行スタイルの影響を遮断する。
-                boolean isLabelLine = line.matches("^(You|Assistant):.*");
-                if (isLabelLine && !currentFlow.getChildren().isEmpty()) {
-                    contentBox.getChildren().add(currentFlow);
+                    if (j < tlines.length && isToolBlockEndLine(tlines[j])) j++;
+                    TitledPane tp = createToolPane(toolName, toolContent.toString());
+                    turnBox.getChildren().add(tp);
                     currentFlow = new TextFlow();
                     currentFlow.setStyle("-fx-wrap-text: true;");
+                    continue;
                 }
 
-                // 通常行をハイライト
-                highlightLine(currentFlow, line);
-
-                // 改行を追加
-                if (i < lines.length - 1) {
-                    Text newline = new Text("\n");
-                    newline.setFont(DEFAULT_FONT);
-                    currentFlow.getChildren().add(newline);
-                }
-
-                if (isLabelLine) {
-                    contentBox.getChildren().add(currentFlow);
+                if (isToolResultLine(line)) {
+                    if (!currentFlow.getChildren().isEmpty()) {
+                        turnBox.getChildren().add(currentFlow);
+                    }
+                    StringBuilder toolContent = new StringBuilder();
+                    String toolName = extractToolName(line);
+                    toolContent.append(stripChatLabelPrefix(line));
+                    j++;
+                    while (j < tlines.length) {
+                        String nextLine = tlines[j];
+                        if (isToolResultLine(nextLine) || nextLine.matches("^(You|Assistant):.*")) break;
+                        if (nextLine.trim().isEmpty() && j + 1 < tlines.length
+                                && !isToolResultLine(tlines[j + 1])
+                                && !isLikelyToolContinuationLine(tlines[j + 1])) {
+                            break;
+                        }
+                        toolContent.append("\n").append(stripChatLabelPrefix(nextLine));
+                        j++;
+                    }
+                    TitledPane tp = createToolPane(toolName, toolContent.toString());
+                    turnBox.getChildren().add(tp);
                     currentFlow = new TextFlow();
                     currentFlow.setStyle("-fx-wrap-text: true;");
+                } else {
+                    boolean isLabelLine = line.matches("^(You|Assistant):.*");
+                    if (isLabelLine && !currentFlow.getChildren().isEmpty()) {
+                        turnBox.getChildren().add(currentFlow);
+                        currentFlow = new TextFlow();
+                        currentFlow.setStyle("-fx-wrap-text: true;");
+                    }
+                    highlightLine(currentFlow, line);
+                    if (j < tlines.length - 1) {
+                        Text newline = new Text("\n");
+                        newline.setFont(DEFAULT_FONT);
+                        currentFlow.getChildren().add(newline);
+                    }
+                    if (isLabelLine) {
+                        turnBox.getChildren().add(currentFlow);
+                        currentFlow = new TextFlow();
+                        currentFlow.setStyle("-fx-wrap-text: true;");
+                    }
+                    j++;
                 }
-
-                i++;
             }
-        }
-        
-        // 最後の TextFlow を追加
-        if (!currentFlow.getChildren().isEmpty()) {
-            contentBox.getChildren().add(currentFlow);
+            if (!currentFlow.getChildren().isEmpty()) turnBox.getChildren().add(currentFlow);
+
+            contentBox.getChildren().add(turnBox);
         }
 
         // スクロールを一番下に
         scrollPane.setVvalue(1.0);
+    }
+
+    /**
+     * サニタイズ済みテキストから会話ターンを抽出して `turns` を構築する。
+     * ターンは `You:` / `Assistant:` のラベル行を起点として次のラベル行直前までを一つにまとめる。
+     */
+    private void buildTurns(String sanitized) {
+        List<String> parsed = parseTurns(sanitized);
+        turns.clear();
+        turns.addAll(parsed);
+    }
+
+    /**
+     * サニタイズ済みテキストから会話ターンを抽出して返す（インスタンス不要）
+     */
+    public static List<String> parseTurns(String sanitized) {
+        List<String> result = new ArrayList<>();
+        if (sanitized == null || sanitized.isEmpty()) return result;
+
+        String[] lines = sanitized.split("\n", -1);
+        StringBuilder sb = new StringBuilder();
+        boolean inTurn = false;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            boolean isLabel = line.matches("^(You|Assistant):.*");
+            if (isLabel) {
+                if (inTurn) {
+                    int len = sb.length();
+                    if (len > 0 && sb.charAt(len - 1) == '\n') sb.setLength(len - 1);
+                    result.add(sb.toString());
+                    sb.setLength(0);
+                }
+                inTurn = true;
+                sb.append(line).append('\n');
+            } else {
+                if (!inTurn) {
+                    inTurn = true;
+                }
+                sb.append(line).append('\n');
+            }
+        }
+        if (sb.length() > 0) {
+            int len = sb.length();
+            if (sb.charAt(len - 1) == '\n') sb.setLength(len - 1);
+            result.add(sb.toString());
+        }
+        return result;
+    }
+
+    /**
+     * テストや呼び出し用にターンの不変リストを返す。
+     */
+    public List<String> getTurns() {
+        return Collections.unmodifiableList(turns);
+    }
+
+    /** ターン数を返す */
+    public int getTurnCount() { return turns.size(); }
+
+    /** 指定インデックスのターン文字列を返す（範囲外は null） */
+    public String getTurnText(int index) {
+        if (index < 0 || index >= turns.size()) return null;
+        return turns.get(index);
+    }
+
+    /** 指定ターンをクリップボードにコピーする。インデックス範囲外は無視する。 */
+    public void copyTurnToClipboard(int index) {
+        String t = getTurnText(index);
+        if (t == null) return;
+        ClipboardContent content = new ClipboardContent();
+        content.putString(t);
+        Clipboard.getSystemClipboard().setContent(content);
+    }
+
+    /** 最新のターンをクリップボードにコピーする（空なら何もしない） */
+    public void copyLatestTurnToClipboard() {
+        if (turns.isEmpty()) return;
+        copyTurnToClipboard(turns.size() - 1);
+    }
+
+    /**
+     * 指定ターンを疑似選択状態（グレーアウト）にする。数百ms後に自動で解除される。
+     */
+    private void highlightTurnSelection(int index) {
+        // JavaFX イベントスレッド上で実行される前提
+        if (index < 0 || index >= turns.size()) return;
+
+        // 既存ハイライトをクリア
+        clearCurrentHighlight();
+
+        // contentBox の子要素のうち、ターンを表す VBox を探してインデックスに対応するものをハイライト
+        int found = -1;
+        for (int i = 0; i < contentBox.getChildren().size(); i++) {
+            javafx.scene.Node n = contentBox.getChildren().get(i);
+            if (n instanceof VBox) {
+                found++;
+                if (found == index) {
+                    // style を直接当てて疑似選択表示
+                    n.setStyle(n.getStyle() + "; -fx-background-color: rgba(200,200,200,0.25);");
+                    highlightedTurnIndex = index;
+                    // タイマーで自動解除（1200ms）
+                    clearHighlightTimer = new PauseTransition(Duration.millis(1200));
+                    clearHighlightTimer.setOnFinished(evt -> clearCurrentHighlight());
+                    clearHighlightTimer.play();
+                    break;
+                }
+            }
+        }
+    }
+
+    private void clearCurrentHighlight() {
+        if (clearHighlightTimer != null) {
+            clearHighlightTimer.stop();
+            clearHighlightTimer = null;
+        }
+        if (highlightedTurnIndex < 0) return;
+
+        int found = -1;
+        for (int i = 0; i < contentBox.getChildren().size(); i++) {
+            javafx.scene.Node n = contentBox.getChildren().get(i);
+            if (n instanceof VBox) {
+                found++;
+                if (found == highlightedTurnIndex) {
+                    // スタイルをリセット（注: 既存の他スタイルを壊さない簡易アプローチ）
+                    String s = n.getStyle();
+                    if (s != null) {
+                        // -fx-background-color: rgba(...) を取り除く簡易処理
+                        s = s.replaceAll(";?\\s*-fx-background-color:\\s*rgba\\([^)]+\\);?", "");
+                        n.setStyle(s);
+                    }
+                    break;
+                }
+            }
+        }
+        highlightedTurnIndex = -1;
     }
 
     /**
