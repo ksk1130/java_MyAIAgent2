@@ -13,15 +13,15 @@ for %%f in ("%LIB_DIR%\*.jar") do (
 if "!CLASSPATH:~0,1!"==";" set CLASSPATH=!CLASSPATH:~1!
 
 set JAVA_CMD=
-if exist "%JRE_HOME%\bin\javaw.exe" (
-  set "JAVA_CMD=%JRE_HOME%\bin\javaw.exe"
+if exist "%JRE_HOME%\bin\java.exe" (
+  set "JAVA_CMD=%JRE_HOME%\bin\java.exe"
 ) else (
-  where javaw >nul 2>nul
-  if %ERRORLEVEL%==0 set "JAVA_CMD=javaw"
+  where java >nul 2>nul
+  if %ERRORLEVEL%==0 set "JAVA_CMD=java"
 )
 
 if not defined JAVA_CMD (
-  echo Java launcher javaw.exe not found. Please install a JRE with javaw or set JAVA_HOME.
+  echo Java launcher java.exe not found. Please install a JRE with java or set JAVA_HOME.
   exit /b 1
 )
 
