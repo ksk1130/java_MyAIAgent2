@@ -3,6 +3,9 @@
  */
 package org.example;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 import javafx.application.Application;
@@ -52,6 +55,7 @@ public class App extends Application {
      * @param stage メインステージ
      */
     public void start(Stage stage) {
+        Logger log = LoggerFactory.getLogger(App.class);
         Path workDir = Path.of(System.getProperty("user.dir"));
         ConversationStore conversationStore = new JsonConversationStore(workDir);
         ChatService chatService = ChatServiceFactory.createDefault();

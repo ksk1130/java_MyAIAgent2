@@ -32,6 +32,10 @@ dependencies {
     
     // Source: https://mvnrepository.com/artifact/org.fxmisc.richtext/richtextfx
     implementation group: 'org.fxmisc.richtext', name: 'richtextfx', version: '0.11.7'
+    // Logging: SLF4J 2.x API + Log4j2 implementation (console encoder charset set via log4j2.xml)
+    implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:2.20.0'
+    implementation 'org.apache.logging.log4j:log4j-core:2.20.0'
+    implementation 'org.apache.logging.log4j:log4j-api:2.20.0'
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
@@ -41,9 +45,18 @@ java {
     }
 }
 
+tasks.withType(JavaCompile).configureEach {
+    // ソースコード内の日本語文字列を正しく扱うため、コンパイル時の文字コードを固定する
+    options.encoding = 'UTF-8'
+}
+
 application {
     // Define the main class for the application.
     mainClass = 'org.example.App'
+    // Force Windows console friendly encoding at JVM startup
+    applicationDefaultJvmArgs = [
+        '-Dfile.encoding=UTF-8'
+    ]
 }
 
 // 依存jarを build/libs/runtime ディレクトリにコピーするタスク

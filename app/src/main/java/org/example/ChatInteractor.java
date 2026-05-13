@@ -124,6 +124,8 @@ public class ChatInteractor {
             return "";
         }
 
+        ExecutionLogger.logRequest(userMessage);
+
         // /clear コマンドは最優先で履歴を完全削除
         if (userMessage.equalsIgnoreCase("/clear")) {
             conversationHistory.clear();
@@ -135,6 +137,7 @@ public class ChatInteractor {
                     conversationStore.save(currentSession);
                 }
             }
+            ExecutionLogger.logReply("会話履歴を削除しました");
             return "You: /clear\nAssistant: 会話履歴を削除しました\n\n";
         }
 
@@ -148,9 +151,13 @@ public class ChatInteractor {
 
         // LLM が tool calling を実行した場合、tracker から結果を取得して表示に追加
         ToolExecutionTracker tracker = chatService.getToolExecutionTracker();
+        java.util.List<String> toolNames = new java.util.ArrayList<>();
         if (tracker != null) {
             var executions = tracker.getExecutions();
             if (!executions.isEmpty()) {
+                for (var exec : executions) {
+                    toolNames.add(exec.toolName());
+                }
                 StringBuilder toolResults = new StringBuilder();
                 for (var exec : executions) {
                     if (!toolResults.isEmpty()) {
@@ -164,6 +171,10 @@ public class ChatInteractor {
                     assistantMessage = toolResultsText + "\n\n" + baseAssistantMessage;
                 }
             }
+        }
+
+        if (!toolNames.isEmpty()) {
+            ExecutionLogger.logToolExecution(toolNames);
         }
 
         conversationHistory.add(new ChatMessage("user", userMessage));
@@ -183,6 +194,7 @@ public class ChatInteractor {
                 + "Assistant: " + assistantMessage + "\n\n";
         }
         transcript.append(turnText);
+        ExecutionLogger.logReply(baseAssistantMessage);
         return turnText;
     }
 
@@ -219,6 +231,8 @@ public class ChatInteractor {
             return;
         }
 
+        ExecutionLogger.logRequest(userMessage);
+
         // /clear コマンドは最優先で履歴を完全削除
         if (userMessage.equalsIgnoreCase("/clear")) {
             conversationHistory.clear();
@@ -232,6 +246,7 @@ public class ChatInteractor {
             }
             String turnText = "You: /clear\nAssistant: 会話履歴を削除しました\n\n";
             onToken.accept(turnText);
+            ExecutionLogger.logReply("会話履歴を削除しました");
             onComplete.run();
             return;
         }
@@ -248,6 +263,7 @@ public class ChatInteractor {
                 + "Assistant: " + assistantMessage + "\n\n";
             transcript.append(turnText);
             onToken.accept(turnText);
+            ExecutionLogger.logReply(assistantMessage);
             onComplete.run();
             return;
         }
@@ -265,9 +281,13 @@ public class ChatInteractor {
                 String assistantMessage = fullLlmText;
                 String toolResultsText = "";
                 ToolExecutionTracker tracker = chatService.getToolExecutionTracker();
+                java.util.List<String> toolNames = new java.util.ArrayList<>();
                 if (tracker != null) {
                     var executions = tracker.getExecutions();
                     if (!executions.isEmpty()) {
+                        for (var exec : executions) {
+                            toolNames.add(exec.toolName());
+                        }
                         StringBuilder toolResults = new StringBuilder();
                         for (var exec : executions) {
                             if (!toolResults.isEmpty()) {
@@ -280,6 +300,10 @@ public class ChatInteractor {
                             assistantMessage = toolResults.toString() + "\n\n" + fullLlmText;
                         }
                     }
+                }
+
+                if (!toolNames.isEmpty()) {
+                    ExecutionLogger.logToolExecution(toolNames);
                 }
 
                 syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
@@ -300,6 +324,7 @@ public class ChatInteractor {
                         + "Assistant: " + assistantMessage + "\n\n";
                 }
                 transcript.append(turnText);
+                ExecutionLogger.logReply(fullLlmText);
                 onComplete.run();
             },
             onError
