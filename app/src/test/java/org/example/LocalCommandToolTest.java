@@ -129,6 +129,14 @@ public class LocalCommandToolTest {
     }
 
     @Test
+    public void testGitReflogIsAllowed() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("git reflog");
+        // reflog は許可サブコマンドなので「許可されていない」エラーを返さない
+        assertFalse(result, result.contains("許可されていないサブコマンドです"));
+    }
+
+    @Test
     public void testCatIsAllowed() {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         String result = tool.execute("cat build.gradle");

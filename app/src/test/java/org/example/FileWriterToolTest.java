@@ -84,6 +84,13 @@ public class FileWriterToolTest {
     }
 
     @Test
+    public void writeFile_ps1拡張子は許可される() throws IOException {
+        String result = tool().writeFile("script.ps1", "Write-Output 'hello'");
+        assertFalse("ps1 は許可拡張子", result.startsWith("(error)"));
+        assertEquals("Write-Output 'hello'", Files.readString(tmp.getRoot().toPath().resolve("script.ps1")));
+    }
+
+    @Test
     public void writeFile_改行がリテラルの場合は改行に正規化する() throws IOException {
         String result = tool().writeFile("summary.txt", "line1\\nline2\\nline3");
         assertFalse(result.startsWith("(error)"));
