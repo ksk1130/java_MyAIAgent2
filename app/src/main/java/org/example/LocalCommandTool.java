@@ -42,7 +42,7 @@ public class LocalCommandTool {
     private static final Set<String> ALLOWED_GIT_SUBCOMMANDS = new HashSet<>(
         Arrays.asList(
             "log", "show", "branch", "status", "rev-parse", "diff",
-            "remote", "tag", "config", "ls-files", "describe"));
+            "remote", "tag", "config", "ls-files", "describe", "reflog"));
 
     /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い）。 */
     private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\\\"']");

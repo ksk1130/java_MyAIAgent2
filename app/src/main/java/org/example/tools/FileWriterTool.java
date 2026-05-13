@@ -21,7 +21,7 @@ public class FileWriterTool {
 
     /** 書き込みを許可するファイル拡張子（小文字）。 */
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
-            ".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml");
+            ".txt", ".md", ".csv", ".json", ".log", ".yaml", ".yml", ".ps1");
 
     private final Path baseDir;
 
