@@ -10,7 +10,7 @@ rmdir /s /q dist 2>nul
 mkdir dist
 
 REM 3. jlinkで最小JRE生成 (Windows用)
-"%JDK_HOME%\bin\jlink.exe" --module-path "%JDK_HOME%\jmods;%FX_HOME%\lib" --add-modules java.base,java.desktop,java.logging,java.xml,java.naming,java.management,javafx.controls,javafx.graphics,javafx.base,jdk.unsupported,java.net.http,jdk.crypto.ec --output dist\jre --strip-debug --compress=zip-9 --no-header-files --no-man-pages
+"%JDK_HOME%\bin\jlink.exe" --module-path "%JDK_HOME%\jmods;%FX_HOME%\lib" --add-modules java.base,java.desktop,java.logging,java.xml,java.naming,java.management,javafx.controls,javafx.graphics,javafx.base,javafx.media,javafx.web,jdk.unsupported,java.net.http,jdk.crypto.ec --output dist\jre --strip-debug --compress=zip-9 --no-header-files --no-man-pages
 if errorlevel 1 (
   echo [ERROR] jlink失敗。JDK/JavaFXパス・モジュール指定を確認してください。
   exit /b 1

@@ -101,7 +101,13 @@ public class ChatInteractor {
                 chatService.restoreMemory(loadedSession.messages());
             }
             this.conversationHistory.addAll(loadedSession.messages());
-            this.transcript.append(formatTranscript(this.conversationHistory));
+            // 保存済みトランスクリプトがあればそれを優先使用する（ツール結果マーカーを保持するため）
+            String savedTranscript = loadedSession.transcript();
+            if (savedTranscript != null && !savedTranscript.isEmpty()) {
+                this.transcript.append(savedTranscript);
+            } else {
+                this.transcript.append(formatTranscript(this.conversationHistory));
+            }
         }
         this.currentSession = loadedSession;
     }
@@ -180,7 +186,6 @@ public class ChatInteractor {
 
         conversationHistory.add(new ChatMessage("user", userMessage));
         conversationHistory.add(new ChatMessage("assistant", assistantMessage));
-        persistConversation();
 
         String turnText;
         if (!toolResultsText.isEmpty()) {
@@ -195,6 +200,7 @@ public class ChatInteractor {
                 + "Assistant: " + assistantMessage + "\n\n";
         }
         transcript.append(turnText);
+        persistConversation();
         ExecutionLogger.logReply(baseAssistantMessage);
         return turnText;
     }
@@ -259,10 +265,10 @@ public class ChatInteractor {
             syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
             conversationHistory.add(new ChatMessage("user", userMessage));
             conversationHistory.add(new ChatMessage("assistant", assistantMessage));
-            persistConversation();
             String turnText = "You: " + userMessage + "\n"
                 + "Assistant: " + assistantMessage + "\n\n";
             transcript.append(turnText);
+            persistConversation();
             onToken.accept(turnText);
             ExecutionLogger.logReply(assistantMessage);
             onComplete.run();
@@ -310,7 +316,6 @@ public class ChatInteractor {
                 syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
                 conversationHistory.add(new ChatMessage("user", userMessage));
                 conversationHistory.add(new ChatMessage("assistant", assistantMessage));
-                persistConversation();
 
                 // transcript はストリーミング中は更新せず、完了時に全ターンテキストを追加
                 String turnText;
@@ -325,6 +330,7 @@ public class ChatInteractor {
                         + "Assistant: " + assistantMessage + "\n\n";
                 }
                 transcript.append(turnText);
+                persistConversation();
                 ExecutionLogger.logReply(fullLlmText);
                 onComplete.run();
             },
@@ -403,6 +409,7 @@ public class ChatInteractor {
             currentSession.setWorkingDirectory(currentWd.toString());
         }
         currentSession.replaceMessages(conversationHistory);
+        currentSession.setTranscript(transcript.toString());
         conversationStore.save(currentSession);
     }
 

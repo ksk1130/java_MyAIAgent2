@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -30,6 +32,8 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.stage.DirectoryChooser;
+import javafx.scene.web.WebView;
+import javafx.scene.web.WebEngine;
 import java.io.File;
 
 /**
@@ -38,6 +42,8 @@ import java.io.File;
  */
 public class App extends Application {
     private static final String APP_NAME = "MyAIAgent2";
+    private static final String TOOL_RESULTS_BEGIN_MARKER = "<<TOOL_RESULTS_BEGIN>>";
+    private static final String TOOL_RESULTS_END_MARKER = "<<TOOL_RESULTS_END>>";
 
     /**
      * Java アプリケーションのメインメソッド。JavaFX を起動する。
@@ -73,6 +79,9 @@ public class App extends Application {
 
         ChatDisplayPane chatHistory = new ChatDisplayPane();
         chatHistory.updateTranscript(interactorRef.get().getTranscript());
+        WebView webView = new WebView();
+        WebEngine webEngine = webView.getEngine();
+        updateWebPreview(webEngine, interactorRef.get().getTranscript());
 
         ListView<SessionSummary> sessionList = new ListView<>();
         sessionList.setPrefWidth(220);
@@ -98,7 +107,7 @@ public class App extends Application {
         Button newChatButton = new Button("+ 新規");
         newChatButton.setOnAction(event -> {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+            switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
         });
 
         Button deleteChatButton = new Button("削除");
@@ -122,10 +131,10 @@ public class App extends Application {
             java.util.List<SessionSummary> remainings = conversationStore.listSessions();
             if (remainings.isEmpty()) {
                 ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+                switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
             } else {
                 SessionSummary next = remainings.get(0);
-                switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, next.sessionId());
+                switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
             }
             refreshSessionsRef[0].run();
         });
@@ -138,7 +147,7 @@ public class App extends Application {
             if (newValue.sessionId().equals(interactorRef.get().getCurrentSessionId())) {
                 return;
             }
-            switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
+            switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
         });
 
         refreshSessionsRef[0].run();
@@ -172,10 +181,10 @@ public class App extends Application {
                 java.util.List<SessionSummary> remainings = conversationStore.listSessions();
                 if (remainings.isEmpty()) {
                     ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
                 } else {
                     SessionSummary next = remainings.get(0);
-                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, next.sessionId());
+                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
                 }
                 refreshSessionsRef[0].run();
             });
@@ -242,8 +251,10 @@ public class App extends Application {
                         // 完了時: ハイライト付き全文再描画
                         if (interactorRef.get() == activeInteractor) {
                             chatHistory.updateTranscript(activeInteractor.getTranscript());
+                            updateWebPreview(webEngine, activeInteractor.getTranscript());
                         } else {
                             chatHistory.updateTranscript(interactorRef.get().getTranscript());
+                            updateWebPreview(webEngine, interactorRef.get().getTranscript());
                         }
                         refreshSessionsRef[0].run();
                         // 作業ディレクトリ表示を最新化（JSON が源泉）
@@ -282,7 +293,7 @@ public class App extends Application {
 
         HBox inputRow = new HBox(8, inputField, sendButton);
         BorderPane chatPane = new BorderPane();
-        chatPane.setCenter(chatHistory);
+        chatPane.setCenter(webView);
         chatPane.setBottom(inputRow);
 
         SplitPane splitPane = new SplitPane(historyPane, chatPane);
@@ -368,6 +379,7 @@ public class App extends Application {
         ConversationStore conversationStore,
         AtomicReference<ChatInteractor> interactorRef,
         ChatDisplayPane chatHistory,
+        WebEngine webEngine,
         Runnable refreshSessions,
         Label baseDirLabel,
         String sessionId) {
@@ -387,6 +399,7 @@ public class App extends Application {
 
         interactorRef.set(selectedInteractor);
         chatHistory.updateTranscript(selectedInteractor.getTranscript());
+        updateWebPreview(webEngine, selectedInteractor.getTranscript());
         baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
 
         if (refreshSessions != null) {
@@ -395,5 +408,232 @@ public class App extends Application {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    private static void updateWebPreview(WebEngine webEngine, String transcript) {
+        String sanitized = transcript == null ? "" : transcript;
+        sanitized = sanitized.replaceAll("[\uFEFF\u200B\u200C\u200D]", "");
+        sanitized = sanitized.replaceAll("[\\p{Cc}&&[^\\r\\n\\t]]", "");
+
+        String body = sanitized.isBlank()
+            ? "<p class='empty'>（会話履歴はまだありません）</p>"
+            : renderTranscriptHtml(sanitized);
+
+        String html = """
+            <!DOCTYPE html>
+            <html lang='ja'>
+            <head>
+              <meta charset='UTF-8'>
+              <style>
+                * { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+                body {
+                  font-family: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Noto Sans JP', 'Consolas', monospace, sans-serif;
+                  margin: 16px; background: #fafafa; color: #1f2937; font-size: 13px;
+                }
+                h2 { margin: 0 0 12px 0; font-size: 18px; }
+                .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+                .msg-row { display: flex; align-items: baseline; gap: 6px; margin: 3px 0; }
+                .label-you { color: #0066cc; font-weight: 600; white-space: nowrap; }
+                .label-assistant { color: #008000; font-weight: 600; white-space: nowrap; }
+                .md-content { flex: 1; line-height: 1.6; }
+                .md-content > *:first-child { margin-top: 0; }
+                .md-content > *:last-child { margin-bottom: 0; }
+                .md-content p { margin: 0 0 4px 0; }
+                .md-content pre { background: #f3f4f6; border-radius: 4px; padding: 8px; overflow-x: auto; margin: 4px 0; }
+                .md-content code { background: #f3f4f6; border-radius: 3px; padding: 1px 4px; font-family: 'Consolas', monospace; font-size: 12px; }
+                .md-content pre code { background: none; padding: 0; }
+                .md-content ul, .md-content ol { margin: 4px 0; padding-left: 20px; }
+                .md-content h1,.md-content h2,.md-content h3 { margin: 8px 0 4px 0; font-size: 14px; }
+                .plain-content { flex: 1; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+                .empty { color: #6b7280; }
+                details.tool { margin: 8px 0; border: 1px solid #d1d5db; border-radius: 8px; background: #fcfcfd; }
+                details.tool > summary { cursor: pointer; padding: 8px 10px; color: #ff6600; font-weight: 700; user-select: none; }
+                details.tool > pre {
+                  margin: 0; padding: 10px; border-top: 1px solid #e5e7eb;
+                  white-space: pre-wrap; word-break: break-word; line-height: 1.5; font-size: 13px; background: #fff;
+                  font-family: 'Yu Gothic UI', 'Yu Gothic', 'Meiryo', 'Consolas', monospace, sans-serif;
+                }
+              </style>
+            </head>
+            <body>
+              <h2>会話プレビュー</h2>
+              <div class='panel'>
+            """ + body + """
+              </div>
+              <script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>
+              <script>
+                if (typeof marked !== 'undefined') {
+                  marked.setOptions({ breaks: true });
+                  document.querySelectorAll('.md-content[data-md]').forEach(function(el) {
+                    el.innerHTML = marked.parse(el.getAttribute('data-md'));
+                  });
+                }
+              </script>
+            </body>
+            </html>
+            """;
+        webEngine.loadContent(html, "text/html");
+    }
+
+    private static String renderTranscriptHtml(String transcript) {
+        String[] lines = transcript.split("\n", -1);
+        StringBuilder html = new StringBuilder();
+
+        String currentRole = "NONE"; // YOU, ASSISTANT, NONE
+        StringBuilder currentContent = new StringBuilder();
+        boolean inToolBlock = false;
+        StringBuilder toolContent = new StringBuilder();
+        String toolName = "tool";
+
+        for (String line : lines) {
+            if (isToolBlockBeginLine(line)) {
+                if (!"NONE".equals(currentRole) && currentContent.length() > 0) {
+                    flushBlock(html, currentRole, currentContent.toString());
+                    currentContent.setLength(0);
+                    currentRole = "NONE";
+                }
+                inToolBlock = true;
+                toolName = "tool";
+                toolContent.setLength(0);
+                continue;
+            }
+            if (isToolBlockEndLine(line)) {
+                appendToolBlockHtml(html, toolName, toolContent.toString());
+                inToolBlock = false;
+                toolContent.setLength(0);
+                toolName = "tool";
+                continue;
+            }
+            if (inToolBlock) {
+                String normalized = stripChatLabelPrefix(line);
+                if (toolContent.length() > 0) {
+                    toolContent.append("\n");
+                }
+                toolContent.append(normalized);
+                if ("tool".equals(toolName) && isToolResultLine(normalized)) {
+                    toolName = extractToolName(normalized);
+                }
+                continue;
+            }
+
+            Matcher youMatcher = Pattern.compile("^You:\\s+(.*)$").matcher(line);
+            Matcher assistantMatcher = Pattern.compile("^Assistant:\\s+(.*)$").matcher(line);
+
+            if (youMatcher.matches()) {
+                if (!"NONE".equals(currentRole) && currentContent.length() > 0) {
+                    flushBlock(html, currentRole, currentContent.toString());
+                }
+                currentRole = "YOU";
+                currentContent = new StringBuilder(youMatcher.group(1));
+            } else if (assistantMatcher.matches()) {
+                if (!"NONE".equals(currentRole) && currentContent.length() > 0) {
+                    flushBlock(html, currentRole, currentContent.toString());
+                }
+                currentRole = "ASSISTANT";
+                currentContent = new StringBuilder(assistantMatcher.group(1));
+            } else {
+                if (!"NONE".equals(currentRole)) {
+                    currentContent.append("\n").append(line);
+                } else if (!line.isBlank()) {
+                    html.append("<div class='plain-content'>").append(escapeHtml(line)).append("</div>");
+                }
+            }
+        }
+
+        if (inToolBlock && toolContent.length() > 0) {
+            appendToolBlockHtml(html, toolName, toolContent.toString());
+        } else if (!"NONE".equals(currentRole) && currentContent.length() > 0) {
+            flushBlock(html, currentRole, currentContent.toString());
+        }
+        return html.toString();
+    }
+
+    private static void flushBlock(StringBuilder html, String role, String content) {
+        if ("YOU".equals(role)) {
+            html.append("<div class='msg-row'>")
+                .append("<span class='label-you'>You:</span>")
+                .append("<div class='plain-content'>")
+                .append(escapeHtml(content))
+                .append("</div></div>\n");
+        } else if ("ASSISTANT".equals(role)) {
+            html.append("<div class='msg-row'>")
+                .append("<span class='label-assistant'>Assistant:</span>")
+                .append("<div class='md-content' data-md='")
+                .append(escapeHtmlAttr(content))
+                .append("'></div></div>\n");
+        }
+    }
+
+    private static String escapeHtmlAttr(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#39;");
+    }
+
+    private static void appendToolBlockHtml(StringBuilder html, String toolName, String content) {
+        String visibleName = (toolName == null || toolName.isBlank()) ? "tool" : toolName;
+        html.append("<details class='tool'><summary>")
+            .append(escapeHtml(visibleName))
+            .append(" の結果</summary><pre>")
+            .append(escapeHtml(content))
+            .append("</pre></details>");
+    }
+
+    private static boolean isToolBlockBeginLine(String line) {
+        return normalizeToolLine(line).equals(TOOL_RESULTS_BEGIN_MARKER);
+    }
+
+    private static boolean isToolBlockEndLine(String line) {
+        return normalizeToolLine(line).equals(TOOL_RESULTS_END_MARKER);
+    }
+
+    private static boolean isToolResultLine(String line) {
+        String normalized = normalizeToolLine(line);
+        return normalized.matches("^\\(tool:\\w+\\).*")
+            || normalized.matches("^[^\\p{L}\\p{N}\\s(]\\s*\\w+:.*");
+    }
+
+    private static String extractToolName(String line) {
+        String normalized = normalizeToolLine(line);
+
+        Matcher m1 = Pattern.compile("^\\(tool:(\\w+)\\)").matcher(normalized);
+        if (m1.find()) {
+            return m1.group(1);
+        }
+        Matcher m2 = Pattern.compile("^[^\\p{L}\\p{N}\\s(]\\s*(\\w+):").matcher(normalized);
+        if (m2.find()) {
+            return m2.group(1);
+        }
+        return "tool";
+    }
+
+    private static String normalizeToolLine(String line) {
+        if (line == null) {
+            return "";
+        }
+        return line.replaceFirst("^Assistant:\\s+", "");
+    }
+
+    private static String stripChatLabelPrefix(String line) {
+        if (line == null) {
+            return "";
+        }
+        return line.replaceFirst("^(You|Assistant):\\s+", "");
+    }
+
+    private static String escapeHtml(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;");
     }
 }

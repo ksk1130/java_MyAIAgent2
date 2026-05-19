@@ -16,9 +16,11 @@ public final class ConversationSession {
     private String updatedAt;
     private List<ChatMessage> messages;
     private String workingDirectory;
+    /** トランスクリプト文字列（ツール結果マーカーを含む）。JSON に永続化する。 */
+    private String transcript;
 
     ConversationSession() {
-        this("", "", "", "", new ArrayList<>(), "");
+        this("", "", "", "", new ArrayList<>(), "", null);
     }
 
     public ConversationSession(
@@ -27,7 +29,7 @@ public final class ConversationSession {
             String createdAt,
             String updatedAt,
             List<ChatMessage> messages) {
-        this(sessionId, title, createdAt, updatedAt, messages, "");
+        this(sessionId, title, createdAt, updatedAt, messages, "", null);
     }
 
     public ConversationSession(
@@ -37,12 +39,24 @@ public final class ConversationSession {
             String updatedAt,
             List<ChatMessage> messages,
             String workingDirectory) {
+        this(sessionId, title, createdAt, updatedAt, messages, workingDirectory, null);
+    }
+
+    public ConversationSession(
+            String sessionId,
+            String title,
+            String createdAt,
+            String updatedAt,
+            List<ChatMessage> messages,
+            String workingDirectory,
+            String transcript) {
         this.sessionId = sessionId;
         this.title = title;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.messages = new ArrayList<>(messages == null ? List.of() : messages);
         this.workingDirectory = workingDirectory == null ? "" : workingDirectory;
+        this.transcript = transcript;
     }
 
     public static ConversationSession createNew(Clock clock) {
@@ -82,6 +96,16 @@ public final class ConversationSession {
 
     public void setWorkingDirectory(String path) {
         this.workingDirectory = path == null ? "" : path;
+    }
+
+    /** 保存済みのトランスクリプト文字列を返す。未保存の場合は null。 */
+    public String transcript() {
+        return transcript;
+    }
+
+    /** トランスクリプト文字列を設定する。 */
+    public void setTranscript(String transcript) {
+        this.transcript = transcript;
     }
 
     public void replaceMessages(List<ChatMessage> newMessages) {

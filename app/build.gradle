@@ -23,6 +23,8 @@ dependencies {
     implementation "org.openjfx:javafx-graphics:${javafxVersion}:${javafxClassifier}"
     implementation "org.openjfx:javafx-controls:${javafxVersion}:${javafxClassifier}"
     implementation "org.openjfx:javafx-fxml:${javafxVersion}:${javafxClassifier}"
+    implementation "org.openjfx:javafx-media:${javafxVersion}:${javafxClassifier}"
+    implementation "org.openjfx:javafx-web:${javafxVersion}:${javafxClassifier}"
 
     // LangChain4j for AI services and Function Calling
     implementation 'dev.langchain4j:langchain4j:1.12.2'
@@ -55,7 +57,8 @@ application {
     applicationDefaultJvmArgs = [
         '-Dfile.encoding=UTF-8',
         '--module-path', configurations.runtimeClasspath.asPath,
-        '--add-modules', 'javafx.controls,javafx.fxml'
+        '--add-modules', 'javafx.controls,javafx.fxml,javafx.media,javafx.web',
+        '--add-exports', 'javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED'
     ]
 }
 

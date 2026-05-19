@@ -46,7 +46,7 @@ public class ToolExecutionTracker {
          * 例: "📌 localcmd: git log -5\n$ git log -5\n(tool:cmd)\n..."
          */
         public String format() {
-            return "📌 " + toolName + ": " + parameter + "\n" + result;
+            return ">> " + toolName + ": " + parameter + "\n" + result;
         }
     }
 }

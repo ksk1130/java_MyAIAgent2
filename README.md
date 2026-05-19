@@ -3,6 +3,7 @@
 JavaFX で構築したデスクトップ向け AI チャットエージェントです。  
 OpenAI 互換エンドポイントに接続し、ツール呼び出し（検索・Git参照・ファイルI/O・ローカルコマンド）を安全制約付きで実行できます。  
 会話履歴の保存、システムプロンプト編集、ストリーミング表示にも対応しています。
+さらに WebView タブで会話のHTMLプレビュー表示も可能です。
 
 ## 目次
 
@@ -43,6 +44,7 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
   - 複数行入力
   - Ctrl+Enter で送信
   - Shift+Enter で改行
+  - WebView タブで会話プレビュー表示
 - 応答生成
   - 非同期処理（UI ブロック回避）
   - ストリーミング逐次表示
@@ -64,7 +66,7 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
 
 - 言語: Java 21
 - ビルド: Gradle
-- UI: JavaFX 21.0.3
+- UI: JavaFX 21.0.3（controls / fxml / media / web）
 - LLM 連携: LangChain4j 1.12.2
 - JSON: Gson
 - テスト: JUnit 4
