@@ -233,7 +233,20 @@ public class OpenAiCompatibleChatService implements ChatService {
             })
             .onRetrieved(ignored -> {})
             .onToolExecuted(ignored -> {})
-            .onCompleteResponse(ignored -> onComplete.accept(accumulated.toString()))
+            .onCompleteResponse(ignored -> {
+                // OpenAI互換ストリームが空完了した場合は同期呼び出しへフォールバックする
+                if (accumulated.isEmpty()) {
+                    try {
+                        String result = assistant.chat(userMessage);
+                        onToken.accept(result);
+                        onComplete.accept(result);
+                    } catch (Exception fallbackErr) {
+                        onError.accept(fallbackErr);
+                    }
+                    return;
+                }
+                onComplete.accept(accumulated.toString());
+            })
             .onError(err -> {
                 // ストリーミング非対応エンドポイントへのフォールバック（同期呼び出し）
                 try {

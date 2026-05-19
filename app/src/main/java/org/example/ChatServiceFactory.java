@@ -1,6 +1,7 @@
 package org.example;
 
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Map;
 import org.example.tools.FileReaderTool;
 import org.example.tools.FileWriterTool;
@@ -20,7 +21,6 @@ public final class ChatServiceFactory {
 
     private static final String DEFAULT_BASE_URL = "https://api.openai.com/v1";
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
-
     private ChatServiceFactory() {
     }
 
@@ -51,9 +51,18 @@ public final class ChatServiceFactory {
         String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
 
         Path workDir = Path.of(System.getProperty("user.dir"));
+        String effectiveBaseUrl = normalizedBaseUrl;
+        String effectiveApiKey = apiKey;
+
+        if (containsGoogleHost(normalizedBaseUrl)) {
+            GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl, apiKey);
+            effectiveBaseUrl = endpoint.baseUrl();
+            effectiveApiKey = endpoint.apiKey();
+        }
+
         return new OpenAiCompatibleChatService(
-                normalizedBaseUrl,
-                apiKey,
+                effectiveBaseUrl,
+                effectiveApiKey,
                 model.isEmpty() ? DEFAULT_MODEL : model,
                 new WorkspaceGrepTool(workDir),
                 new GitLogTool(workDir),
@@ -74,6 +83,10 @@ public final class ChatServiceFactory {
             return trimmed.substring(0, trimmed.length() - 1);
         }
         return trimmed;
+    }
+
+    static boolean containsGoogleHost(String baseUrl) {
+        return trimToEmpty(baseUrl).toLowerCase(Locale.ROOT).contains("google");
     }
 
     /**
