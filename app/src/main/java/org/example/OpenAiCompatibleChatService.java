@@ -6,6 +6,9 @@ import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import java.nio.file.Path;
@@ -195,6 +198,7 @@ public class OpenAiCompatibleChatService implements ChatService {
     @Override
     public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
         try {
+            restoreMemory(history);
             // 新しい LLM 呼び出しの前に tracker をクリア
             toolExecutionTracker.clear();
             
@@ -218,6 +222,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             Consumer<String> onToken,
             Consumer<String> onComplete,
             Consumer<Throwable> onError) {
+        restoreMemory(history);
         toolExecutionTracker.clear();
         // トークンを逐次 onToken に通知し、完了時に onComplete へ全文テキストを渡す
         StringBuilder accumulated = new StringBuilder();
@@ -263,9 +268,43 @@ public class OpenAiCompatibleChatService implements ChatService {
     public Path getWorkingDirectory() {
         return this.workingDirectory;
     }
+
     @Override
     public void clearMemory() {
         if (currentChatMemory != null) {
             currentChatMemory.clear();
         }
-    }}
+    }
+
+    @Override
+    public void restoreMemory(List<ChatMessage> history) {
+        if (currentChatMemory == null) {
+            return;
+        }
+        if (history == null || history.isEmpty()) {
+            currentChatMemory.clear();
+            return;
+        }
+
+        List<dev.langchain4j.data.message.ChatMessage> langchainHistory = new java.util.ArrayList<>();
+        for (ChatMessage message : history) {
+            if (message == null || message.role() == null) {
+                continue;
+            }
+            String content = message.content() == null ? "" : message.content();
+            switch (message.role()) {
+                case "user" -> langchainHistory.add(UserMessage.from(content));
+                case "assistant" -> langchainHistory.add(AiMessage.from(content));
+                case "system" -> langchainHistory.add(SystemMessage.from(content));
+                default -> {
+                }
+            }
+        }
+
+        if (langchainHistory.isEmpty()) {
+            currentChatMemory.clear();
+        } else {
+            currentChatMemory.set(langchainHistory);
+        }
+    }
+}

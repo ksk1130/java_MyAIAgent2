@@ -98,16 +98,7 @@ public class App extends Application {
         Button newChatButton = new Button("+ 新規");
         newChatButton.setOnAction(event -> {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            ChatInteractor createdInteractor = new ChatInteractor(
-                chatService,
-                new DefaultManualToolExecutor(),
-                conversationStore,
-                created.sessionId());
-            interactorRef.set(createdInteractor);
-            chatHistory.updateTranscript(createdInteractor.getTranscript());
-            refreshSessionsRef[0].run();
-            // 新規セッションの作業ディレクトリを表示に反映（JSON が源泉）
-            baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+            switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
         });
 
         Button deleteChatButton = new Button("削除");
@@ -131,26 +122,10 @@ public class App extends Application {
             java.util.List<SessionSummary> remainings = conversationStore.listSessions();
             if (remainings.isEmpty()) {
                 ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                ChatInteractor createdInteractor = new ChatInteractor(
-                    chatService,
-                    new DefaultManualToolExecutor(),
-                    conversationStore,
-                    created.sessionId());
-                interactorRef.set(createdInteractor);
-                chatHistory.updateTranscript(createdInteractor.getTranscript());
-                    // セッション作成後の作業ディレクトリ表示更新（JSON が源泉）
-                    baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+                switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
             } else {
                 SessionSummary next = remainings.get(0);
-                ChatInteractor selectedInteractor = new ChatInteractor(
-                    chatService,
-                    new DefaultManualToolExecutor(),
-                    conversationStore,
-                    next.sessionId());
-                interactorRef.set(selectedInteractor);
-                chatHistory.updateTranscript(selectedInteractor.getTranscript());
-                    // 選択したセッションの作業ディレクトリ表示更新（JSON が源泉）
-                    baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+                switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, next.sessionId());
             }
             refreshSessionsRef[0].run();
         });
@@ -163,15 +138,7 @@ public class App extends Application {
             if (newValue.sessionId().equals(interactorRef.get().getCurrentSessionId())) {
                 return;
             }
-            ChatInteractor selectedInteractor = new ChatInteractor(
-                chatService,
-                new DefaultManualToolExecutor(),
-                conversationStore,
-                newValue.sessionId());
-            interactorRef.set(selectedInteractor);
-            chatHistory.updateTranscript(selectedInteractor.getTranscript());
-            // セッション切替時に作業ディレクトリ表示を更新（JSON が源泉）
-            baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+            switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
         });
 
         refreshSessionsRef[0].run();
@@ -205,26 +172,10 @@ public class App extends Application {
                 java.util.List<SessionSummary> remainings = conversationStore.listSessions();
                 if (remainings.isEmpty()) {
                     ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                    ChatInteractor createdInteractor = new ChatInteractor(
-                        chatService,
-                        new DefaultManualToolExecutor(),
-                        conversationStore,
-                        created.sessionId());
-                    interactorRef.set(createdInteractor);
-                    chatHistory.updateTranscript(createdInteractor.getTranscript());
-                    // セッション作成後の作業ディレクトリ表示更新（JSON が源泉）
-                    baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, created.sessionId());
                 } else {
                     SessionSummary next = remainings.get(0);
-                    ChatInteractor selectedInteractor = new ChatInteractor(
-                        chatService,
-                        new DefaultManualToolExecutor(),
-                        conversationStore,
-                        next.sessionId());
-                    interactorRef.set(selectedInteractor);
-                    chatHistory.updateTranscript(selectedInteractor.getTranscript());
-                    // 選択したセッションの作業ディレクトリ表示更新（JSON が源泉）
-                    baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, refreshSessionsRef[0], baseDirLabel, next.sessionId());
                 }
                 refreshSessionsRef[0].run();
             });
@@ -410,5 +361,39 @@ public class App extends Application {
         stage.setTitle(APP_NAME);
         stage.setScene(scene);
         stage.show();
+    }
+
+    private void switchToSession(
+        ChatService chatService,
+        ConversationStore conversationStore,
+        AtomicReference<ChatInteractor> interactorRef,
+        ChatDisplayPane chatHistory,
+        Runnable refreshSessions,
+        Label baseDirLabel,
+        String sessionId) {
+
+        if (sessionId == null || sessionId.isBlank()) {
+            return;
+        }
+
+        // LLM 側のメモリをクリアしてから新しいセッションを読み込む
+        chatService.clearMemory();
+
+        ChatInteractor selectedInteractor = new ChatInteractor(
+            chatService,
+            new DefaultManualToolExecutor(),
+            conversationStore,
+            sessionId);
+
+        interactorRef.set(selectedInteractor);
+        chatHistory.updateTranscript(selectedInteractor.getTranscript());
+        baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+
+        if (refreshSessions != null) {
+            try {
+                refreshSessions.run();
+            } catch (Exception ignored) {
+            }
+        }
     }
 }

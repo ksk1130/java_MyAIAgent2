@@ -107,4 +107,13 @@ public interface ChatService {
      */
     default void clearMemory() {
     }
+
+    /**
+     * チャットメモリに履歴を復元する。既定実装は何もしない。
+     * セッション切替時に JSON から読み出した履歴を LLM 側へ再投入する用途を想定する。
+     *
+     * @param history 復元したい会話履歴
+     */
+    default void restoreMemory(List<ChatMessage> history) {
+    }
 }

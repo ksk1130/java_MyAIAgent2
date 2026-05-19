@@ -137,6 +137,42 @@ public class ChatInteractorTest {
     }
 
     @Test
+    public void constructorRestoresLoadedSessionIntoChatServiceMemory() {
+        FakeConversationStore store = new FakeConversationStore();
+        store.session = new ConversationSession(
+            "s1",
+            "title",
+            "2026-05-03T00:00:00Z",
+            "2026-05-03T00:00:00Z",
+            List.of(
+                new ChatMessage("user", "loaded user"),
+                new ChatMessage("assistant", "loaded assistant")));
+
+        List<List<ChatMessage>> restoredSnapshots = new ArrayList<>();
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "echo:" + userMessage;
+            }
+
+            @Override
+            public void restoreMemory(List<ChatMessage> history) {
+                restoredSnapshots.add(List.copyOf(history));
+            }
+        };
+
+        new ChatInteractor(
+            service,
+            message -> java.util.Optional.empty(),
+            store);
+
+        assertEquals(1, restoredSnapshots.size());
+        assertEquals(2, restoredSnapshots.get(0).size());
+        assertEquals("loaded user", restoredSnapshots.get(0).get(0).content());
+        assertEquals("loaded assistant", restoredSnapshots.get(0).get(1).content());
+    }
+
+    @Test
     public void onUserMessageSavesConversationWhenStoreIsEnabled() {
         FakeConversationStore store = new FakeConversationStore();
         ChatInteractor interactor = new ChatInteractor(

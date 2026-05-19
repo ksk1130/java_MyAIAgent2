@@ -98,6 +98,7 @@ public class ChatInteractor {
                 chatService.setWorkingDirectory(wdPath);
                 // セッション側にも保存して JSON と一致させておく
                 loadedSession.setWorkingDirectory(wdPath.toString());
+                chatService.restoreMemory(loadedSession.messages());
             }
             this.conversationHistory.addAll(loadedSession.messages());
             this.transcript.append(formatTranscript(this.conversationHistory));
