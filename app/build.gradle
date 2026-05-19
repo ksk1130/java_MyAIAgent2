@@ -52,7 +52,7 @@ tasks.withType(JavaCompile).configureEach {
 
 application {
     // Define the main class for the application.
-    mainClass = 'org.example.App'
+    mainClass = 'jp.euks.myagent2.chat.App'
     // Force Windows console friendly encoding at JVM startup
     applicationDefaultJvmArgs = [
         '-Dfile.encoding=UTF-8',
