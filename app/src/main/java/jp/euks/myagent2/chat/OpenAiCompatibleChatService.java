@@ -30,6 +30,7 @@ public class OpenAiCompatibleChatService implements ChatService {
 - `grep` / `WorkspaceGrepTool` — ワークスペース内検索（参照のみ）
 - `gitlog` / `gitshow` / `gitbranch` — Git の読み取り系操作（参照のみ）
 - `readfile` / `writefile` — ファイルの読み取り／書き込み（書き込みは慎重に）
+- `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（参照のみ）
 - `localcmd` — ローカルコマンド実行（許可: git/grepほか、非破壊系のコマンドのみ、シェルメタ文字禁止、タイムアウト有り）
 
 運用ルール:
@@ -162,7 +163,14 @@ public class OpenAiCompatibleChatService implements ChatService {
         this.chatMemory = this.currentChatMemory;
 
         // ツール群を構築
-        this.agentTools = new AgentTools(grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, toolExecutionTracker);
+        this.agentTools = new AgentTools(
+            grepTool,
+            gitTool,
+            fileReaderTool,
+            fileWriterTool,
+            localCommandTool,
+            new ExcelReaderTool(),
+            toolExecutionTracker);
 
         // AiServices で Assistant インターフェース実装を生成
         // ツールは自動的に Function Calling として登録される
@@ -275,6 +283,7 @@ public class OpenAiCompatibleChatService implements ChatService {
         agentTools.updateFileToolReferences(
             new jp.euks.myagent2.tools.FileReaderTool(normalized),
             new jp.euks.myagent2.tools.FileWriterTool(normalized));
+        agentTools.updateExcelToolReference(new ExcelReaderTool(normalized));
     }
 
     @Override

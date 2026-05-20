@@ -7,9 +7,13 @@ import static org.junit.Assert.assertFalse;
 import java.nio.file.Path;
 
 import jp.euks.myagent2.tools.AgentTools;
+import jp.euks.myagent2.tools.ExcelReaderTool;
 import jp.euks.myagent2.tools.GitLogTool;
 import jp.euks.myagent2.tools.LocalCommandTool;
 import jp.euks.myagent2.tools.WorkspaceGrepTool;
+
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import org.junit.Test;
 
@@ -101,5 +105,27 @@ public class OpenAiCompatibleChatServiceTest {
 
         String afterB = tools.grep("only-in-b");
         assertTrue(afterB.contains("b.txt"));
+    }
+
+    @Test
+    public void testAgentToolsReadExcel() throws Exception {
+        Path tempDir = java.nio.file.Files.createTempDirectory("agent-tools-excel");
+        Path workbookPath = tempDir.resolve("AAA.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+            sheet.createRow(0).createCell(0).setCellValue("A1");
+            sheet.getRow(0).createCell(1).setCellValue("B1");
+            sheet.createRow(1).createCell(0).setCellValue("A2");
+            try (java.io.OutputStream outputStream = java.nio.file.Files.newOutputStream(workbookPath)) {
+                workbook.write(outputStream);
+            }
+        }
+
+        AgentTools tools = new AgentTools(null, null, null, null, null, new ExcelReaderTool(tempDir), null);
+        String result = tools.readexcel("AAA.xlsx", "Sheet1", "A1:B2");
+
+        assertTrue(result, result.contains("sheet: Sheet1"));
+        assertTrue(result, result.contains("row 1: A1 | B1"));
+        assertTrue(result, result.contains("row 2: A2 | "));
     }
 }

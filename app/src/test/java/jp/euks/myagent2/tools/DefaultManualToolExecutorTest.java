@@ -12,6 +12,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.Test;
 
 public class DefaultManualToolExecutorTest {
@@ -94,5 +96,29 @@ public class DefaultManualToolExecutorTest {
         String result = executor.tryExecute("/tool cmd java -version").orElse("");
 
         assertTrue(result, result.contains("許可されていないコマンドです"));
+    }
+
+    @Test
+    public void tryExecuteRunsReadExcelTool() throws Exception {
+        Path tempDir = Files.createTempDirectory("excel-test");
+        Path workbookPath = tempDir.resolve("AAA.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+            sheet.createRow(0).createCell(0).setCellValue("v11");
+            sheet.getRow(0).createCell(1).setCellValue("v12");
+            sheet.createRow(1).createCell(0).setCellValue("v21");
+            sheet.getRow(1).createCell(1).setCellValue("v22");
+            try (java.io.OutputStream outputStream = Files.newOutputStream(workbookPath)) {
+                workbook.write(outputStream);
+            }
+        }
+
+        DefaultManualToolExecutor executor = new DefaultManualToolExecutor(Clock.systemUTC(), tempDir);
+
+        String result = executor.tryExecute("/tool readexcel AAA.xlsx Sheet1 A1:B2").orElse("");
+
+        assertTrue(result, result.startsWith("(tool:readexcel) file: AAA.xlsx"));
+        assertTrue(result, result.contains("row 1: v11 | v12"));
+        assertTrue(result, result.contains("row 2: v21 | v22"));
     }
 }

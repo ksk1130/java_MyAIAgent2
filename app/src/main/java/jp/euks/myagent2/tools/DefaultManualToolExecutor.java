@@ -26,6 +26,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     private LocalCommandTool localCommandTool;
     /** ファイル読み取りツール。 */
     private FileReaderTool fileReaderTool = new FileReaderTool();
+    /** Excel 読み取りツール。 */
+    private ExcelReaderTool excelReaderTool = new ExcelReaderTool();
 
     /**
      * 既定のコンストラクタ。`user.dir` を作業ディレクトリとして使用します。
@@ -81,6 +83,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         this.workspaceGrepTool = new WorkspaceGrepTool(this.currentDir);
         this.gitLogTool = new GitLogTool(this.currentDir);
         this.localCommandTool = new LocalCommandTool(this.currentDir);
+        this.fileReaderTool = new FileReaderTool(this.currentDir);
+        this.excelReaderTool = new ExcelReaderTool(this.currentDir);
     }
 
     @Override
@@ -132,6 +136,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
             case "setdir" -> runSetDir(args);
             case "getdir" -> runGetDir();
             case "readfile" -> runReadFile(args);
+            case "readexcel" -> runReadExcel(args);
             default -> "(tool:error) 未知のツールです: " + toolName + "。`/tool help` を使ってください。";
         };
     }
@@ -233,6 +238,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         gitLogTool = new GitLogTool(currentDir);
         localCommandTool = new LocalCommandTool(currentDir);
         fileReaderTool = new FileReaderTool(currentDir);
+        excelReaderTool = new ExcelReaderTool(currentDir);
         return "(tool:setdir) 作業ディレクトリを変更しました: " + currentDir;
     }
 
@@ -252,6 +258,18 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     }
 
     /**
+     * /tool readexcel <file> <sheet> <range>
+     * Excel ブックから指定範囲の値を読み込んで返します。
+     */
+    private String runReadExcel(String args) {
+        java.util.List<String> tokens = splitArgs(args);
+        if (tokens.size() != 3) {
+            return "(tool:error) readexcel には <file> <sheet> <range> が必要です。例: /tool readexcel AAA.xlsx Sheet1 A1:C3";
+        }
+        return "(tool:readexcel) " + excelReaderTool.readRange(tokens.get(0), tokens.get(1), tokens.get(2));
+    }
+
+    /**
      * /tool getdir
      * 現在の作業ディレクトリを表示します。
      */
@@ -266,7 +284,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @return ヘルプ文字列
      */
     private String helpText() {
-        return "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile\n"
+        return "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel\n"
                 + "  - /tool time\n"
                 + "  - /tool echo <text>\n"
                 + "  - /tool grep <query>\n"
@@ -276,6 +294,20 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool cmd <command> [args]   ローカルコマンド実行（git/grep/rg のみ）\n"
                 + "  - /tool setdir <path>          作業ディレクトリを変更する\n"
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
-                + "  - /tool readfile <path>        テキストファイルを読み込む";
+                + "  - /tool readfile <path>        テキストファイルを読み込む\n"
+                + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む";
+    }
+
+    /**
+     * ダブルクォート対応の簡易引数分割。
+     */
+    private static java.util.List<String> splitArgs(String args) {
+        java.util.List<String> result = new java.util.ArrayList<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([^\"]*)\"|(\\S+)").matcher(args);
+        while (matcher.find()) {
+            String quoted = matcher.group(1);
+            result.add(quoted != null ? quoted : matcher.group(2));
+        }
+        return result;
     }
 }

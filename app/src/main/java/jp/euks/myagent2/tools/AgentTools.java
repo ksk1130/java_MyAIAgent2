@@ -15,6 +15,7 @@ public class AgentTools {
     private FileReaderTool fileReaderTool;
     private FileWriterTool fileWriterTool;
     private LocalCommandTool localCommandTool;
+    private ExcelReaderTool excelReaderTool;
     private final ToolExecutionTracker toolExecutionTracker;
 
     /**
@@ -53,11 +54,27 @@ public class AgentTools {
             FileWriterTool fileWriterTool,
             LocalCommandTool localCommandTool,
             ToolExecutionTracker toolExecutionTracker) {
+        this(grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, new ExcelReaderTool(), toolExecutionTracker);
+    }
+
+    /**
+     * ツール群と tracker を全て渡すコンストラクタ（Excel 対応）。
+     * null でも構わない（Tool メソッド内で null チェック）。
+     */
+    public AgentTools(
+            WorkspaceGrepTool grepTool,
+            GitLogTool gitTool,
+            FileReaderTool fileReaderTool,
+            FileWriterTool fileWriterTool,
+            LocalCommandTool localCommandTool,
+            ExcelReaderTool excelReaderTool,
+            ToolExecutionTracker toolExecutionTracker) {
         this.grepTool = grepTool;
         this.gitTool = gitTool;
         this.fileReaderTool = fileReaderTool;
         this.fileWriterTool = fileWriterTool;
         this.localCommandTool = localCommandTool;
+        this.excelReaderTool = excelReaderTool;
         this.toolExecutionTracker = toolExecutionTracker;
     }
 
@@ -76,6 +93,13 @@ public class AgentTools {
     public void updateFileToolReferences(jp.euks.myagent2.tools.FileReaderTool fileReaderTool, jp.euks.myagent2.tools.FileWriterTool fileWriterTool) {
         this.fileReaderTool = fileReaderTool;
         this.fileWriterTool = fileWriterTool;
+    }
+
+    /**
+     * Excel 読み取りツール参照を差し替える。
+     */
+    public void updateExcelToolReference(ExcelReaderTool excelReaderTool) {
+        this.excelReaderTool = excelReaderTool;
     }
 
     @Tool("現在の日時を取得する")
@@ -169,6 +193,30 @@ public class AgentTools {
         String result = fileReaderTool.readFile(path);
         if (toolExecutionTracker != null) {
             toolExecutionTracker.record("readfile", path, result);
+        }
+        return result;
+    }
+
+    @Tool("Excel ブックから指定シート・セル範囲の値を読み取る")
+    public String readexcel(
+            @P("Excel ブックのパス（絶対パスまたは相対パス）") String path,
+            @P("シート名") String sheetName,
+            @P("セル範囲。例: A1:C3") String range) {
+        if (excelReaderTool == null) {
+            return "(error) readexcelツールが設定されていません";
+        }
+        if (path == null || path.isBlank()) {
+            return "(error) readexcel の path が不正です";
+        }
+        if (sheetName == null || sheetName.isBlank()) {
+            return "(error) readexcel の sheetName が不正です";
+        }
+        if (range == null || range.isBlank()) {
+            return "(error) readexcel の range が不正です";
+        }
+        String result = excelReaderTool.readRange(path, sheetName, range);
+        if (toolExecutionTracker != null) {
+            toolExecutionTracker.record("readexcel", path + " " + sheetName + " " + range, result);
         }
         return result;
     }
