@@ -10,9 +10,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.InputStream;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -47,6 +49,7 @@ public class App extends Application {
     private static final String APP_NAME = "MyAIAgent2";
     private static final String TOOL_RESULTS_BEGIN_MARKER = "<<TOOL_RESULTS_BEGIN>>";
     private static final String TOOL_RESULTS_END_MARKER = "<<TOOL_RESULTS_END>>";
+    private static final String MARKED_JS_INLINE = loadMarkedJsInline();
 
     /**
      * Java アプリケーションのメインメソッド。JavaFX を起動する。
@@ -463,7 +466,9 @@ public class App extends Application {
               <div class='panel'>
             """ + body + """
               </div>
-              <script src='https://cdn.jsdelivr.net/npm/marked/marked.min.js'></script>
+                            <script>
+                        """ + MARKED_JS_INLINE + """
+                            </script>
               <script>
                 if (typeof marked !== 'undefined') {
                   marked.setOptions({ breaks: true });
@@ -476,6 +481,18 @@ public class App extends Application {
             </html>
             """;
         webEngine.loadContent(html, "text/html");
+    }
+
+    private static String loadMarkedJsInline() {
+        try (InputStream in = App.class.getClassLoader().getResourceAsStream("vendor/marked.min.js")) {
+            if (in == null) {
+                return "";
+            }
+            String js = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            return js.replace("</script", "<\\/script");
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private static String renderTranscriptHtml(String transcript) {
