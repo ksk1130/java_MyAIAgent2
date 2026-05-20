@@ -33,22 +33,20 @@ public class OpenAiCompatibleChatService implements ChatService {
 - `localcmd` — ローカルコマンド実行（許可: git/grepほか、非破壊系のコマンドのみ、シェルメタ文字禁止、タイムアウト有り）
 
 運用ルール:
-1) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
+1) 可能な限り利用可能なツールを活用すること
+2) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
    a) 思考プロセスを必ず表示：「<ユーザーキーワード>から以下のパターンで検索します」と、読み替え理由を含めてキーワード一覧を明示する
       例1:「APIキーを探して」→「APIキー は英語では apiKey, API_KEY, api_key, ApiKey などが考えられるため、以下のパターンで検索します：apiKey, API_KEY, api_key, ApiKey」
       例2:「パス区切りを探して」→「パス区切りはプログラムでは normalizePath, normalize, separator, pathSeparator などの関数や変数で扱われるため、以下のパターンで検索します：normalize, separator, pathSeparator, normalizePath」
    b) 複数パターンで `grep` を実行
    c) すべての grep 結果を収集して、重複を排除してまとめる
    d) 統一的な形式で提示する
-
-2) まずユーザーの意図を短く確認してからツール利用を決定すること。
-3) 可能な限り読み取り系ツール（`grep`/`gitlog`/`readfile`）で情報を収集し、必要に応じてのみ `localcmd` や `writefile` を提案・実行すること。
-4) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
-5) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること。
-6) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること。
-7) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
-8) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
-9) ツール実行結果（`localcmd` の結果など）は、ユーザーにわかりやすく回答に含めること。実行コマンドと出力結果の両方を提示する。
+3) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
+4) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること。
+5) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること。
+6) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
+7) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
+8) ツール実行結果（`localcmd` の結果など）は、ユーザーにわかりやすく回答に含めること。実行コマンドと出力結果の両方を提示する。
 
 回答フォーマット（優先順）:
 - 1行要約: 結論や提案の短い要点
@@ -296,13 +294,12 @@ public class OpenAiCompatibleChatService implements ChatService {
         if (currentChatMemory == null) {
             return;
         }
-        if (history == null || history.isEmpty()) {
-            currentChatMemory.clear();
-            return;
-        }
-
         List<dev.langchain4j.data.message.ChatMessage> langchainHistory = new java.util.ArrayList<>();
-        for (ChatMessage message : history) {
+        // 現在設定されている systemPrompt を毎回先頭に注入し、次の送信から即時反映させる。
+        langchainHistory.add(SystemMessage.from(systemPrompt));
+
+        if (history != null) {
+            for (ChatMessage message : history) {
             if (message == null || message.role() == null) {
                 continue;
             }
@@ -310,16 +307,15 @@ public class OpenAiCompatibleChatService implements ChatService {
             switch (message.role()) {
                 case "user" -> langchainHistory.add(UserMessage.from(content));
                 case "assistant" -> langchainHistory.add(AiMessage.from(content));
-                case "system" -> langchainHistory.add(SystemMessage.from(content));
+                case "system" -> {
+                    // 既存履歴の system は無視し、現在の設定値を優先する。
+                }
                 default -> {
                 }
             }
         }
-
-        if (langchainHistory.isEmpty()) {
-            currentChatMemory.clear();
-        } else {
-            currentChatMemory.set(langchainHistory);
         }
+
+        currentChatMemory.set(langchainHistory);
     }
 }
