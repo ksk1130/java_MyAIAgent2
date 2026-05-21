@@ -1,5 +1,8 @@
 package jp.euks.myagent2.tools;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,10 +27,12 @@ import java.util.regex.Pattern;
  * Windows + Git Bash 環境では Unix コマンドを Git Bash バイナリから自動解決する。
  */
 public class LocalCommandTool {
+    private static final Logger log = LoggerFactory.getLogger(LocalCommandTool.class);
     private static final int DEFAULT_COMMAND_TIMEOUT_SECONDS = 20;
     private static final int MAX_COMMAND_TIMEOUT_SECONDS = 30;
     private static final int MAX_OUTPUT_LINES = 1000;
     private static final int MAX_OUTPUT_CHARS = 100_000;
+    private static final String ADDONS_DIR_NAME = "addons";
 
     /** 許可するコマンド（小文字）。 */
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
@@ -72,8 +77,10 @@ public class LocalCommandTool {
 
     /** 起動時に検出した Git Bash の bin ディレクトリ（未検出の場合は null）。 */
     private static final Path GIT_BASH_BIN_DIR = detectGitBashBinDir();
+    private static final Set<String> DIAGNOSTIC_LOGGED_BASE_DIRS = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
     private final Path baseDir;
+    private final Path addonsDir;
     private final int commandTimeoutSeconds;
 
     /** 起動時に解決したコマンド名→実行ファイルパスのマップ。 */
@@ -86,8 +93,45 @@ public class LocalCommandTool {
      */
     public LocalCommandTool(Path baseDir) {
         this.baseDir = baseDir.toAbsolutePath().normalize();
+        this.addonsDir = this.baseDir.resolve(ADDONS_DIR_NAME).normalize();
+        ensureAddonsDirExists();
         this.resolvedExes = buildResolvedExes();
         this.commandTimeoutSeconds = resolveCommandTimeoutSeconds();
+        logStartupDiagnostics();
+    }
+
+    /**
+     * 起動時診断ログを出力する（同一 baseDir では一度だけ）。
+     */
+    private void logStartupDiagnostics() {
+        String baseKey = baseDir.toString();
+        if (!DIAGNOSTIC_LOGGED_BASE_DIRS.add(baseKey)) {
+            return;
+        }
+
+        log.info("[LOCALCMD] addons path: {}", addonsDir);
+
+        StringBuilder sb = new StringBuilder();
+        resolvedExes.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .forEach(entry -> {
+                if (!sb.isEmpty()) {
+                    sb.append(", ");
+                }
+                sb.append(entry.getKey()).append("=").append(entry.getValue());
+            });
+        log.info("[LOCALCMD] resolved executables: {}", sb);
+    }
+
+    /**
+     * 外部ツール配置用の addons ディレクトリを作成する。
+     */
+    private void ensureAddonsDirExists() {
+        try {
+            Files.createDirectories(addonsDir);
+        } catch (IOException ignored) {
+            // 作成できない場合は既存 PATH のみで実行を継続する
+        }
     }
 
     /**
@@ -113,20 +157,37 @@ public class LocalCommandTool {
 
     /**
      * 起動時に各コマンドの実行ファイルパスを解決してマップとして返す。
-     * grep は PATH チェックを優先、それ以外の Unix コマンドは Git Bash から解決する。
+     * grep/rg は PATH チェックを優先し、それ以外の Unix コマンドは Git Bash から解決する。
      */
-    private static Map<String, String> buildResolvedExes() {
+    private Map<String, String> buildResolvedExes() {
         Map<String, String> exes = new HashMap<>();
         // grep は PATH チェックを優先（WSL/MSYS2 など環境の grep を使う可能性があるため）
-        exes.put("grep", resolveGrepExe());
+        exes.put("grep", resolveAddonOrDefaultExe("grep", resolveGrepExe()));
+        // rg も PATH チェックを優先
+        exes.put("rg", resolveAddonOrDefaultExe("rg", resolveRgExe()));
         // その他の Unix コマンドは Git Bash から解決
         for (String cmd : Arrays.asList(
-                "rg", "ls", "find", "cat", "head", "tail",
+                "ls", "find", "cat", "head", "tail",
                 "wc", "stat", "diff", "sort", "uniq", "cut",
                 "tree", "basename", "dirname", "realpath")) {
-            exes.put(cmd, resolveUnixExe(cmd));
+            exes.put(cmd, resolveAddonOrDefaultExe(cmd, resolveUnixExe(cmd)));
         }
         return Collections.unmodifiableMap(exes);
+    }
+
+    /**
+     * addons 配下に実行ファイルがあれば優先し、なければ既定解決結果を返す。
+     */
+    private String resolveAddonOrDefaultExe(String command, String defaultResolvedExe) {
+        Path exeCandidate = addonsDir.resolve(command + ".exe");
+        if (Files.isRegularFile(exeCandidate)) {
+            return exeCandidate.toString();
+        }
+        Path plainCandidate = addonsDir.resolve(command);
+        if (Files.isRegularFile(plainCandidate)) {
+            return plainCandidate.toString();
+        }
+        return defaultResolvedExe;
     }
 
     /**
@@ -178,6 +239,30 @@ public class LocalCommandTool {
 
         // Git Bash から解決
         return resolveUnixExe("grep");
+    }
+
+    /**
+     * rg 実行ファイルのパスを解決する。
+     * PATH に rg があればそれを優先し、なければ Git Bash の既知パスを探す。
+     */
+    private static String resolveRgExe() {
+        // PATH に rg があればそのまま使う
+        try {
+            ProcessBuilder pb = new ProcessBuilder("rg", "--version");
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+            boolean finished = p.waitFor(3, TimeUnit.SECONDS);
+            if (finished && p.exitValue() == 0) {
+                return "rg";
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException ignored) {
+            // rg が PATH にないだけなので無視して次の解決方法へ
+        }
+
+        // Git Bash から解決
+        return resolveUnixExe("rg");
     }
 
     /**
@@ -356,6 +441,7 @@ public class LocalCommandTool {
             ProcessBuilder pb = new ProcessBuilder(parts);
             pb.directory(baseDir.toFile());
             pb.redirectErrorStream(true);
+            prependAddonsToPath(pb.environment());
 
             Process process = pb.start();
 
@@ -382,6 +468,41 @@ public class LocalCommandTool {
         } catch (IOException e) {
             return new CommandResult(true, 1, "(error) コマンド実行に失敗しました: " + e.getMessage());
         }
+    }
+
+    /**
+     * 子プロセスの PATH に addons ディレクトリを先頭追加する。
+     */
+    private void prependAddonsToPath(Map<String, String> env) {
+        if (!Files.isDirectory(addonsDir)) {
+            return;
+        }
+
+        String pathKey = null;
+        for (String key : env.keySet()) {
+            if ("PATH".equalsIgnoreCase(key)) {
+                pathKey = key;
+                break;
+            }
+        }
+        if (pathKey == null) {
+            pathKey = "PATH";
+        }
+
+        String currentPath = env.getOrDefault(pathKey, "");
+        String addonsPath = addonsDir.toString();
+        if (currentPath.isBlank()) {
+            env.put(pathKey, addonsPath);
+            return;
+        }
+
+        String separator = currentPath.contains(";") ? ";" : java.io.File.pathSeparator;
+        for (String part : currentPath.split(Pattern.quote(separator))) {
+            if (addonsPath.equalsIgnoreCase(part)) {
+                return;
+            }
+        }
+        env.put(pathKey, addonsPath + separator + currentPath);
     }
 
     /** コマンド実行結果の内部表現。 */

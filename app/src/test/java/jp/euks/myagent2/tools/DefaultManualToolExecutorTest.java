@@ -62,11 +62,11 @@ public class DefaultManualToolExecutorTest {
 
         DefaultManualToolExecutor executor = new DefaultManualToolExecutor(
             Clock.systemUTC(),
-            new WorkspaceGrepTool(tempDir, 10));
+            new WorkspaceGrepTool(tempDir, 10, true));
 
         String result = executor.tryExecute("/tool grep beta").orElse("");
 
-        assertTrue(result.startsWith("(tool:grep)"));
+        assertTrue(result.startsWith("(tool:grep:java)"));
         assertTrue(result.contains("notes.txt:2 | beta match"));
     }
 

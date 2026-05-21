@@ -19,10 +19,10 @@ public class WorkspaceGrepToolTest {
         Path sjisFile = tempDir.resolve("src/sjis.txt");
         Files.write(sjisFile, sjisText.getBytes(Charset.forName("Windows-31J")));
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("あいうえお");
 
-        assertTrue(result.startsWith("(tool:grep) 1件"));
+        assertTrue(result.startsWith("(tool:grep:java) 1件"));
         assertTrue(result.contains("sjis.txt:2 | あいうえおを含む行"));
     }
     @Test
@@ -34,11 +34,11 @@ public class WorkspaceGrepToolTest {
             "first line\nChatService appears here\n",
             StandardCharsets.UTF_8);
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("chatservice");
 
-        assertTrue(result.startsWith("(tool:grep) 1件"));
-        assertTrue(result.contains("src/sample.txt:2"));
+        assertTrue(result.startsWith("(tool:grep:java) 1件"));
+        assertTrue(result.contains("sample.txt:2"));
     }
 
     @Test
@@ -46,7 +46,7 @@ public class WorkspaceGrepToolTest {
         Path tempDir = Files.createTempDirectory("workspace-grep-none");
         Files.writeString(tempDir.resolve("README.md"), "hello", StandardCharsets.UTF_8);
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("notfound");
 
         assertTrue(result.startsWith("(tool:grep) 0件"));
@@ -61,11 +61,11 @@ public class WorkspaceGrepToolTest {
             "ChatService\nChatServiceTest\nChatInteractor\nChatInteractorTest\n",
             StandardCharsets.UTF_8);
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("Chat -v Test");
 
         // Chat を含むが Test を含まない行は ChatService と ChatInteractor
-        assertTrue(result.startsWith("(tool:grep) 2件"));
+        assertTrue(result.startsWith("(tool:grep:java) 2件"));
         assertTrue(result.contains("ChatService"));
         assertTrue(result.contains("ChatInteractor"));
         // Test を含む行は除外されるので、Test を含む結果は無い
@@ -81,11 +81,11 @@ public class WorkspaceGrepToolTest {
             "apple\napple pie\norange\norange juice\n",
             StandardCharsets.UTF_8);
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("apple --exclude pie");
 
         // apple を含むが pie を含まない行は apple のみ
-        assertTrue(result.startsWith("(tool:grep) 1件"));
+        assertTrue(result.startsWith("(tool:grep:java) 1件"));
         assertTrue(result.contains("apple"));
         assertTrue(!result.contains("pie"));
     }
@@ -99,7 +99,7 @@ public class WorkspaceGrepToolTest {
             "ChatServiceTest\nChatInteractorTest\n",
             StandardCharsets.UTF_8);
 
-        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10);
+        WorkspaceGrepTool grepTool = new WorkspaceGrepTool(tempDir, 10, true);
         String result = grepTool.search("Chat -v Test");
 
         // すべてが Test を含むので、除外されてマッチなし

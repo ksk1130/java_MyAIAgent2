@@ -2,6 +2,7 @@ package jp.euks.myagent2;
 
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -198,6 +199,48 @@ public class LocalCommandToolTest {
             String resolved = tool.getResolvedExe(cmd);
             assertFalse("getResolvedExe(" + cmd + ") が空ではないこと",
                 resolved == null || resolved.isEmpty());
+        }
+    }
+
+    @Test
+    public void testConstructorCreatesAddonsDirectory() throws Exception {
+        Path tempDir = Files.createTempDirectory("localcmd-addons-test-");
+        try {
+            new LocalCommandTool(tempDir);
+            assertTrue(Files.isDirectory(tempDir.resolve("addons")));
+        } finally {
+            cleanupDirectory(tempDir);
+        }
+    }
+
+    @Test
+    public void testResolvedExePrefersAddonsDirectory() throws Exception {
+        Path tempDir = Files.createTempDirectory("localcmd-addons-resolve-");
+        try {
+            Path addons = tempDir.resolve("addons");
+            Files.createDirectories(addons);
+            Path rgExe = addons.resolve("rg.exe");
+            Files.writeString(rgExe, "dummy");
+
+            LocalCommandTool tool = new LocalCommandTool(tempDir);
+            assertEquals(rgExe.toString(), tool.getResolvedExe("rg"));
+        } finally {
+            cleanupDirectory(tempDir);
+        }
+    }
+
+    private static void cleanupDirectory(Path dir) throws Exception {
+        if (dir == null || !Files.exists(dir)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder())
+                .forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (Exception ignored) {
+                    }
+                });
         }
     }
 }

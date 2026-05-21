@@ -1,12 +1,17 @@
 package jp.euks.myagent2.tools;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -14,11 +19,16 @@ import java.util.stream.Stream;
  * 大きなファイルやビルド出力ディレクトリを除外し、結果を整形して返す。
  */
 public class WorkspaceGrepTool {
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceGrepTool.class);
     private static final int DEFAULT_MAX_MATCHES = 1_000;
     private static final int MAX_FILE_SIZE_BYTES = 1_000_000;
+    private static final Charset WINDOWS_31J = Charset.forName("Windows-31J");
+    private static final int RG_TIMEOUT_SECONDS = 10;
 
     private final Path rootDir;
     private final int maxMatches;
+    private final String resolvedRgExe;
+    private final boolean rgAvailable;
 
     public WorkspaceGrepTool(Path rootDir) {
         this(rootDir, DEFAULT_MAX_MATCHES);
@@ -27,6 +37,27 @@ public class WorkspaceGrepTool {
     WorkspaceGrepTool(Path rootDir, int maxMatches) {
         this.rootDir = rootDir;
         this.maxMatches = maxMatches;
+        this.resolvedRgExe = resolveRgExe();
+        this.rgAvailable = isRgAvailable(this.resolvedRgExe);
+        if (!this.rgAvailable) {
+            log.info("[GREP] rg is unavailable at startup, fallback to Java grep. candidate={}", this.resolvedRgExe);
+        }
+    }
+
+    /** テスト用: rg を無効化して常に Java grep を使う */
+    WorkspaceGrepTool(Path rootDir, int maxMatches, boolean disableRg) {
+        this.rootDir = rootDir;
+        this.maxMatches = maxMatches;
+        if (disableRg) {
+            this.resolvedRgExe = "rg";
+            this.rgAvailable = false;
+        } else {
+            this.resolvedRgExe = resolveRgExe();
+            this.rgAvailable = isRgAvailable(this.resolvedRgExe);
+            if (!this.rgAvailable) {
+                log.info("[GREP] rg is unavailable at startup, fallback to Java grep. candidate={}", this.resolvedRgExe);
+            }
+        }
     }
 
     /**
@@ -67,20 +98,43 @@ public class WorkspaceGrepTool {
         }
 
         try {
-            List<String> matches = collectMatches(searchPattern, excludePattern);
-            if (matches.isEmpty()) {
+            GrepResult result = collectMatchesWithSource(searchPattern, excludePattern);
+            if (result.matches.isEmpty()) {
                 String desc = excludePattern == null
                     ? "'" + searchPattern + "' は見つかりませんでした"
                     : "'" + searchPattern + "' で '" + excludePattern + "' を除いた結果は見つかりませんでした";
                 return "(tool:grep) 0件: " + desc;
             }
-            return "(tool:grep) " + matches.size() + "件\n" + String.join("\n", matches);
+            String head = "(tool:grep:" + result.source + ") " + result.matches.size() + "件";
+            return head + "\n" + String.join("\n", result.matches);
         } catch (IOException e) {
             return "(tool:error) grep実行中に失敗しました: " + e.getMessage();
         }
     }
 
-    private List<String> collectMatches(String searchPattern, String excludePattern) throws IOException {
+    private GrepResult collectMatchesWithSource(String searchPattern, String excludePattern) throws IOException {
+        // rg(UTF-8専用)で高速検索（利用可能時のみ）
+        if (rgAvailable) {
+            List<String> rgMatches = collectMatchesByRgUtf(searchPattern, excludePattern);
+            if (!rgMatches.isEmpty()) {
+                return new GrepResult("rg", rgMatches);
+            }
+        }
+        // Java 実装(Windows-31J専用)でフォールバック
+        List<String> javaMatches = collectMatchesByJavaSjis(searchPattern, excludePattern);
+        return new GrepResult("java", javaMatches);
+    }
+
+    private static class GrepResult {
+        final String source;
+        final List<String> matches;
+        GrepResult(String source, List<String> matches) {
+            this.source = source;
+            this.matches = matches;
+        }
+    }
+
+    private List<String> collectMatchesByJavaSjis(String searchPattern, String excludePattern) throws IOException {
         List<String> results = new ArrayList<>();
         String needle = searchPattern.toLowerCase(Locale.ROOT);
         String excludeNeedle = excludePattern == null ? null : excludePattern.toLowerCase(Locale.ROOT);
@@ -102,18 +156,147 @@ public class WorkspaceGrepTool {
         return results;
     }
 
-    private void collectFileMatches(Path file, String needle, String excludeNeedle, List<String> results) {
-        List<String> lines = null;
-        // まずUTF-8で試行、失敗時はShift_JIS(CP932/Windows-31J)で再試行
+    private List<String> collectMatchesByRgUtf(String searchPattern, String excludePattern) {
+        List<String> results = new ArrayList<>();
+        String excludeNeedle = excludePattern == null ? null : excludePattern.toLowerCase(Locale.ROOT);
+
+        List<String> cmd = new ArrayList<>(Arrays.asList(
+            resolvedRgExe,
+            "--encoding", "utf-8",
+            "--line-number",
+            "--no-heading",
+            "--color", "never",
+            "--fixed-strings",
+            "--ignore-case",
+            searchPattern,
+            ".",
+            "--glob", "!build/**",
+            "--glob", "!.gradle/**",
+            "--glob", "!bin/**"));
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.directory(rootDir.toFile());
+        pb.redirectErrorStream(true);
+
         try {
-            lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-        } catch (IOException | RuntimeException e1) {
-            try {
-                lines = Files.readAllLines(file, java.nio.charset.Charset.forName("Windows-31J"));
-            } catch (IOException | RuntimeException e2) {
-                // どちらも失敗した場合はスキップ
-                return;
+            Process process = pb.start();
+            boolean finished = process.waitFor(RG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                log.info("[GREP] rg timed out, fallback to Java grep. command={}", cmd);
+                return results;
             }
+
+            int exitCode = process.exitValue();
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            if (exitCode != 0 && exitCode != 1) {
+                String summary = output.isBlank() ? "(no output)" : output.lines().findFirst().orElse("(no output)");
+                log.info("[GREP] rg failed (exit={}), fallback to Java grep. firstLine={}", exitCode, summary);
+                return results;
+            }
+
+            if (output.isBlank()) {
+                return results;
+            }
+
+            String[] lines = output.split("\\R");
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                String formatted = formatRgOutputLine(line, excludeNeedle);
+                if (formatted == null) {
+                    continue;
+                }
+                results.add(formatted);
+                if (results.size() >= maxMatches) {
+                    break;
+                }
+            }
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.info("[GREP] rg execution error, fallback to Java grep. message={}", e.getMessage());
+            return results;
+        }
+
+        return results;
+    }
+
+    private String formatRgOutputLine(String rgLine, String excludeNeedle) {
+        int firstColon = rgLine.indexOf(':');
+        if (firstColon <= 0) {
+            return null;
+        }
+        int secondColon = rgLine.indexOf(':', firstColon + 1);
+        if (secondColon <= firstColon + 1) {
+            return null;
+        }
+
+        String pathPart = rgLine.substring(0, firstColon).replace('\\', '/');
+        String lineNoPart = rgLine.substring(firstColon + 1, secondColon);
+        String textPart = rgLine.substring(secondColon + 1).strip();
+
+        if (excludeNeedle != null && textPart.toLowerCase(Locale.ROOT).contains(excludeNeedle)) {
+            return null;
+        }
+        if (textPart.length() > 120) {
+            textPart = textPart.substring(0, 120) + "...";
+        }
+        return pathPart + ":" + lineNoPart + " | " + textPart;
+    }
+
+    private String resolveRgExe() {
+        // 1. rootDir/addons（ユーザーのワークスペース内 addons）
+        Path addonsExe = rootDir.resolve("addons/rg.exe");
+        if (Files.isRegularFile(addonsExe)) {
+            return addonsExe.toString();
+        }
+        Path addonsPlain = rootDir.resolve("addons/rg");
+        if (Files.isRegularFile(addonsPlain)) {
+            return addonsPlain.toString();
+        }
+        // 2. JVM 作業ディレクトリ/addons（アプリ自身の addons）
+        Path appAddonsExe = Path.of(System.getProperty("user.dir")).resolve("addons/rg.exe");
+        if (Files.isRegularFile(appAddonsExe)) {
+            return appAddonsExe.toString();
+        }
+        Path appAddonsPlain = Path.of(System.getProperty("user.dir")).resolve("addons/rg");
+        if (Files.isRegularFile(appAddonsPlain)) {
+            return appAddonsPlain.toString();
+        }
+        return "rg";
+    }
+
+    private boolean isRgAvailable(String rgExe) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(rgExe, "--version");
+            pb.directory(rootDir.toFile());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private void collectFileMatches(Path file, String needle, String excludeNeedle, List<String> results) {
+        List<String> lines;
+        // Java フォールバックは Windows-31J 専用で読む。
+        try {
+            lines = Files.readAllLines(file, WINDOWS_31J);
+        } catch (IOException | RuntimeException e) {
+            return;
         }
 
         for (int i = 0; i < lines.size(); i++) {
