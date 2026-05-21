@@ -25,5 +25,5 @@ if not defined JAVA_CMD (
   exit /b 1
 )
 
-"%JAVA_CMD%" -cp "!CLASSPATH!" org.example.App %*
+"%JAVA_CMD%" -cp "!CLASSPATH!" jp.euks.myagent2.chat.App %*
 endlocal

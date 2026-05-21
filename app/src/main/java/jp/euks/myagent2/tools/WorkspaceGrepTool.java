@@ -1,0 +1,338 @@
+package jp.euks.myagent2.tools;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
+/**
+ * ワークスペース内のファイルを検索するユーティリティ。
+ * 大きなファイルやビルド出力ディレクトリを除外し、結果を整形して返す。
+ */
+public class WorkspaceGrepTool {
+    private static final Logger log = LoggerFactory.getLogger(WorkspaceGrepTool.class);
+    private static final int DEFAULT_MAX_MATCHES = 1_000;
+    private static final int MAX_FILE_SIZE_BYTES = 1_000_000;
+    private static final Charset WINDOWS_31J = Charset.forName("Windows-31J");
+    private static final int RG_TIMEOUT_SECONDS = 10;
+
+    private final Path rootDir;
+    private final int maxMatches;
+    private final String resolvedRgExe;
+    private final boolean rgAvailable;
+
+    public WorkspaceGrepTool(Path rootDir) {
+        this(rootDir, DEFAULT_MAX_MATCHES);
+    }
+
+    WorkspaceGrepTool(Path rootDir, int maxMatches) {
+        this.rootDir = rootDir;
+        this.maxMatches = maxMatches;
+        this.resolvedRgExe = resolveRgExe();
+        this.rgAvailable = isRgAvailable(this.resolvedRgExe);
+        if (!this.rgAvailable) {
+            log.info("[GREP] rg is unavailable at startup, fallback to Java grep. candidate={}", this.resolvedRgExe);
+        }
+    }
+
+    /** テスト用: rg を無効化して常に Java grep を使う */
+    WorkspaceGrepTool(Path rootDir, int maxMatches, boolean disableRg) {
+        this.rootDir = rootDir;
+        this.maxMatches = maxMatches;
+        if (disableRg) {
+            this.resolvedRgExe = "rg";
+            this.rgAvailable = false;
+        } else {
+            this.resolvedRgExe = resolveRgExe();
+            this.rgAvailable = isRgAvailable(this.resolvedRgExe);
+            if (!this.rgAvailable) {
+                log.info("[GREP] rg is unavailable at startup, fallback to Java grep. candidate={}", this.resolvedRgExe);
+            }
+        }
+    }
+
+    /**
+     * 指定したクエリ文字列でワークスペース内のファイルを検索し、結果をフォーマットして返す。
+     * 結果は `(tool:grep) N件\npath:line | text` の形式になる。
+     * 空クエリや内部I/Oエラーはエラーメッセージを返す。
+     *
+     * フォーマット例：
+     *   "Chat"              → Chat を含む行を検索
+     *   "Chat -v Test"      → Chat を含むが Test を含まない行を検索
+     *   "Chat --exclude Stub" → Chat を含むが Stub を含まない行を検索
+     *
+     * @param query 検索語（部分一致、大小区別なし）、オプションで " -v exclude" または " --exclude exclude"
+     * @return フォーマットされた検索結果またはエラー文字列
+     */
+    public String search(String query) {
+        String trimmed = query == null ? "" : query.trim();
+        if (trimmed.isEmpty()) {
+            return "(tool:error) 空の検索語は指定できません。";
+        }
+
+        // クエリをパース: "query -v exclude" または "query --exclude exclude"
+        String searchPattern = trimmed;
+        String excludePattern = null;
+
+        if (trimmed.contains(" -v ")) {
+            String[] parts = trimmed.split(" -v ", 2);
+            searchPattern = parts[0].trim();
+            excludePattern = parts[1].trim();
+        } else if (trimmed.contains(" --exclude ")) {
+            String[] parts = trimmed.split(" --exclude ", 2);
+            searchPattern = parts[0].trim();
+            excludePattern = parts[1].trim();
+        }
+
+        if (searchPattern.isEmpty()) {
+            return "(tool:error) 検索パターンが空です。";
+        }
+
+        try {
+            GrepResult result = collectMatchesWithSource(searchPattern, excludePattern);
+            if (result.matches.isEmpty()) {
+                String desc = excludePattern == null
+                    ? "'" + searchPattern + "' は見つかりませんでした"
+                    : "'" + searchPattern + "' で '" + excludePattern + "' を除いた結果は見つかりませんでした";
+                return "(tool:grep) 0件: " + desc;
+            }
+            String head = "(tool:grep:" + result.source + ") " + result.matches.size() + "件";
+            return head + "\n" + String.join("\n", result.matches);
+        } catch (IOException e) {
+            return "(tool:error) grep実行中に失敗しました: " + e.getMessage();
+        }
+    }
+
+    private GrepResult collectMatchesWithSource(String searchPattern, String excludePattern) throws IOException {
+        // rg(UTF-8専用)で高速検索（利用可能時のみ）
+        if (rgAvailable) {
+            List<String> rgMatches = collectMatchesByRgUtf(searchPattern, excludePattern);
+            if (!rgMatches.isEmpty()) {
+                return new GrepResult("rg", rgMatches);
+            }
+        }
+        // Java 実装(Windows-31J専用)でフォールバック
+        List<String> javaMatches = collectMatchesByJavaSjis(searchPattern, excludePattern);
+        return new GrepResult("java", javaMatches);
+    }
+
+    private static class GrepResult {
+        final String source;
+        final List<String> matches;
+        GrepResult(String source, List<String> matches) {
+            this.source = source;
+            this.matches = matches;
+        }
+    }
+
+    private List<String> collectMatchesByJavaSjis(String searchPattern, String excludePattern) throws IOException {
+        List<String> results = new ArrayList<>();
+        String needle = searchPattern.toLowerCase(Locale.ROOT);
+        String excludeNeedle = excludePattern == null ? null : excludePattern.toLowerCase(Locale.ROOT);
+
+        try (Stream<Path> stream = Files.walk(rootDir)) {
+            List<Path> candidates = stream
+                .filter(Files::isRegularFile)
+                .filter(this::isSearchTarget)
+                .toList();
+
+            for (Path file : candidates) {
+                collectFileMatches(file, needle, excludeNeedle, results);
+                if (results.size() >= maxMatches) {
+                    break;
+                }
+            }
+        }
+
+        return results;
+    }
+
+    private List<String> collectMatchesByRgUtf(String searchPattern, String excludePattern) {
+        List<String> results = new ArrayList<>();
+        String excludeNeedle = excludePattern == null ? null : excludePattern.toLowerCase(Locale.ROOT);
+
+        List<String> cmd = new ArrayList<>(Arrays.asList(
+            resolvedRgExe,
+            "--encoding", "utf-8",
+            "--line-number",
+            "--no-heading",
+            "--color", "never",
+            "--fixed-strings",
+            "--ignore-case",
+            searchPattern,
+            ".",
+            "--glob", "!build/**",
+            "--glob", "!.gradle/**",
+            "--glob", "!bin/**"));
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.directory(rootDir.toFile());
+        pb.redirectErrorStream(true);
+
+        try {
+            Process process = pb.start();
+            boolean finished = process.waitFor(RG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                log.info("[GREP] rg timed out, fallback to Java grep. command={}", cmd);
+                return results;
+            }
+
+            int exitCode = process.exitValue();
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            if (exitCode != 0 && exitCode != 1) {
+                String summary = output.isBlank() ? "(no output)" : output.lines().findFirst().orElse("(no output)");
+                log.info("[GREP] rg failed (exit={}), fallback to Java grep. firstLine={}", exitCode, summary);
+                return results;
+            }
+
+            if (output.isBlank()) {
+                return results;
+            }
+
+            String[] lines = output.split("\\R");
+            for (String line : lines) {
+                if (line == null || line.isBlank()) {
+                    continue;
+                }
+                String formatted = formatRgOutputLine(line, excludeNeedle);
+                if (formatted == null) {
+                    continue;
+                }
+                results.add(formatted);
+                if (results.size() >= maxMatches) {
+                    break;
+                }
+            }
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.info("[GREP] rg execution error, fallback to Java grep. message={}", e.getMessage());
+            return results;
+        }
+
+        return results;
+    }
+
+    private String formatRgOutputLine(String rgLine, String excludeNeedle) {
+        int firstColon = rgLine.indexOf(':');
+        if (firstColon <= 0) {
+            return null;
+        }
+        int secondColon = rgLine.indexOf(':', firstColon + 1);
+        if (secondColon <= firstColon + 1) {
+            return null;
+        }
+
+        String pathPart = rgLine.substring(0, firstColon).replace('\\', '/');
+        String lineNoPart = rgLine.substring(firstColon + 1, secondColon);
+        String textPart = rgLine.substring(secondColon + 1).strip();
+
+        if (excludeNeedle != null && textPart.toLowerCase(Locale.ROOT).contains(excludeNeedle)) {
+            return null;
+        }
+        if (textPart.length() > 120) {
+            textPart = textPart.substring(0, 120) + "...";
+        }
+        return pathPart + ":" + lineNoPart + " | " + textPart;
+    }
+
+    private String resolveRgExe() {
+        // 1. rootDir/addons（ユーザーのワークスペース内 addons）
+        Path addonsExe = rootDir.resolve("addons/rg.exe");
+        if (Files.isRegularFile(addonsExe)) {
+            return addonsExe.toString();
+        }
+        Path addonsPlain = rootDir.resolve("addons/rg");
+        if (Files.isRegularFile(addonsPlain)) {
+            return addonsPlain.toString();
+        }
+        // 2. JVM 作業ディレクトリ/addons（アプリ自身の addons）
+        Path appAddonsExe = Path.of(System.getProperty("user.dir")).resolve("addons/rg.exe");
+        if (Files.isRegularFile(appAddonsExe)) {
+            return appAddonsExe.toString();
+        }
+        Path appAddonsPlain = Path.of(System.getProperty("user.dir")).resolve("addons/rg");
+        if (Files.isRegularFile(appAddonsPlain)) {
+            return appAddonsPlain.toString();
+        }
+        return "rg";
+    }
+
+    private boolean isRgAvailable(String rgExe) {
+        try {
+            ProcessBuilder pb = new ProcessBuilder(rgExe, "--version");
+            pb.directory(rootDir.toFile());
+            pb.redirectErrorStream(true);
+
+            Process process = pb.start();
+            boolean finished = process.waitFor(3, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                return false;
+            }
+            return process.exitValue() == 0;
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private void collectFileMatches(Path file, String needle, String excludeNeedle, List<String> results) {
+        List<String> lines;
+        // Java フォールバックは Windows-31J 専用で読む。
+        try {
+            lines = Files.readAllLines(file, WINDOWS_31J);
+        } catch (IOException | RuntimeException e) {
+            return;
+        }
+
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String lineLower = line.toLowerCase(Locale.ROOT);
+            // 検索パターンを含む か つ 除外パターンを含まない行を取得
+            if (lineLower.contains(needle)) {
+                if (excludeNeedle == null || !lineLower.contains(excludeNeedle)) {
+                    results.add(formatMatch(file, i + 1, line));
+                    if (results.size() >= maxMatches) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isSearchTarget(Path file) {
+        String normalized = rootDir.relativize(file).toString().replace('\\', '/');
+        if (normalized.startsWith("build/") || normalized.startsWith(".gradle/") || normalized.startsWith("bin/")) {
+            return false;
+        }
+
+        try {
+            return Files.size(file) <= MAX_FILE_SIZE_BYTES;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private String formatMatch(Path file, int lineNumber, String line) {
+        String normalized = rootDir.relativize(file).toString().replace('\\', '/');
+        String singleLine = line.strip();
+        if (singleLine.length() > 120) {
+            singleLine = singleLine.substring(0, 120) + "...";
+        }
+        return normalized + ":" + lineNumber + " | " + singleLine;
+    }
+}
