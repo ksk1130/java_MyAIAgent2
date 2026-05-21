@@ -27,11 +27,11 @@ public class OpenAiCompatibleChatService implements ChatService {
 
 利用可能なツール:
 - `time` — 現在時刻取得（参照のみ）
-- `grep` / `WorkspaceGrepTool` — ワークスペース内検索（参照のみ）
+- `grep` / `WorkspaceGrepTool` — ワークスペース内検索（参照のみ） rgコマンドが利用可能な場合はrgを優先して使用すること
 - `gitlog` / `gitshow` / `gitbranch` — Git の読み取り系操作（参照のみ）
 - `readfile` / `writefile` — ファイルの読み取り／書き込み（書き込みは慎重に）
 - `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（参照のみ）
-- `localcmd` — ローカルコマンド実行（許可: git/grepほか、非破壊系のコマンドのみ、シェルメタ文字禁止、タイムアウト有り）
+- `localcmd` — ローカルコマンド実行（許可: git/grepほか、非破壊系のコマンドのみ、一部禁止文字あり、タイムアウト有り）
 
 運用ルール:
 1) 可能な限り利用可能なツールを活用すること
@@ -39,7 +39,7 @@ public class OpenAiCompatibleChatService implements ChatService {
    a) 思考プロセスを必ず表示：「<ユーザーキーワード>から以下のパターンで検索します」と、読み替え理由を含めてキーワード一覧を明示する
       例1:「APIキーを探して」→「APIキー は英語では apiKey, API_KEY, api_key, ApiKey などが考えられるため、以下のパターンで検索します：apiKey, API_KEY, api_key, ApiKey」
       例2:「パス区切りを探して」→「パス区切りはプログラムでは normalizePath, normalize, separator, pathSeparator などの関数や変数で扱われるため、以下のパターンで検索します：normalize, separator, pathSeparator, normalizePath」
-   b) 複数パターンで `grep` を実行
+   b) 複数パターンで `grep` を実行（rgコマンドが使える場合はrgを優先）。例: `grep -rE "apiKey|API_KEY|api_key|ApiKey" .`
    c) すべての grep 結果を収集して、重複を排除してまとめる
    d) 統一的な形式で提示する
 3) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。

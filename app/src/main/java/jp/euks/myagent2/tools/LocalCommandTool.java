@@ -49,8 +49,8 @@ public class LocalCommandTool {
             "log", "show", "branch", "status", "rev-parse", "diff",
             "remote", "tag", "config", "ls-files", "describe", "reflog"));
 
-    /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い）。 */
-    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\\\"']");
+    /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い、シングルクオートは許可）。 */
+    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\"]");
 
     /** find コマンドで禁止するオプション（コマンド実行・ファイル削除系）。 */
     private static final Set<String> FIND_FORBIDDEN_OPTIONS = new HashSet<>(Arrays.asList(
@@ -282,7 +282,7 @@ public class LocalCommandTool {
 
         String trimmed = command.trim();
         if (hasDangerousChars(trimmed)) {
-            return "(error) 危険な記号が含まれています: & ; < > ( ) $ ` \\ \" '";
+            return "(error) 危険な記号が含まれています: & ; < > ( ) $ ` \\ \"";
         }
 
         String[] stages = trimmed.split("\\|");

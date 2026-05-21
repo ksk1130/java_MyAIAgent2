@@ -164,6 +164,13 @@ public class LocalCommandToolTest {
     }
 
     @Test
+    public void testFindWithSingleQuoteAndAsteriskIsAllowed() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("find . -name '*Test*'");
+        assertFalse(result, result.contains("危険な記号が含まれています"));
+    }
+
+    @Test
     public void testCatPathTraversalIsBlocked() {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         String result = tool.execute("cat ../secret.txt");
