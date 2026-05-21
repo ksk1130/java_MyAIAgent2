@@ -35,6 +35,8 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.stage.Stage;
 import javafx.stage.DirectoryChooser;
 import javafx.scene.web.WebView;
@@ -83,8 +85,6 @@ public class App extends Application {
             initial.sessionId());
         AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(initialInteractor);
 
-        ChatDisplayPane chatHistory = new ChatDisplayPane();
-        chatHistory.updateTranscript(interactorRef.get().getTranscript());
         WebView webView = new WebView();
         WebEngine webEngine = webView.getEngine();
         updateWebPreview(webEngine, interactorRef.get().getTranscript());
@@ -113,7 +113,7 @@ public class App extends Application {
         Button newChatButton = new Button("+ 新規");
         newChatButton.setOnAction(event -> {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
         });
 
         Button deleteChatButton = new Button("削除");
@@ -137,10 +137,10 @@ public class App extends Application {
             java.util.List<SessionSummary> remainings = conversationStore.listSessions();
             if (remainings.isEmpty()) {
                 ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+                switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
             } else {
                 SessionSummary next = remainings.get(0);
-                switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
+                switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
             }
             refreshSessionsRef[0].run();
         });
@@ -153,7 +153,7 @@ public class App extends Application {
             if (newValue.sessionId().equals(interactorRef.get().getCurrentSessionId())) {
                 return;
             }
-            switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
+            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
         });
 
         refreshSessionsRef[0].run();
@@ -187,10 +187,10 @@ public class App extends Application {
                 java.util.List<SessionSummary> remainings = conversationStore.listSessions();
                 if (remainings.isEmpty()) {
                     ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+                    switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
                 } else {
                     SessionSummary next = remainings.get(0);
-                    switchToSession(chatService, conversationStore, interactorRef, chatHistory, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
+                    switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
                 }
                 refreshSessionsRef[0].run();
             });
@@ -218,6 +218,10 @@ public class App extends Application {
         HBox.setHgrow(inputField, Priority.ALWAYS);
         // ベースディレクトリ表示と変更ボタン（送信アクションからも更新できるようここで生成）
         baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+        Label progressLabel = new Label();
+        progressLabel.setStyle("-fx-text-fill: #FF6600;");
+        progressLabel.setVisible(false);
+        progressLabel.setManaged(false);
         Button changeBaseDirButton = new Button("変更");
         changeBaseDirButton.setOnAction(ev -> {
             DirectoryChooser chooser = new DirectoryChooser();
@@ -244,6 +248,9 @@ public class App extends Application {
             inputField.setDisable(true);
             sendButton.setDisable(true);
             sendButton.setText("応答中...");
+            progressLabel.setVisible(true);
+            progressLabel.setManaged(true);
+            progressLabel.setText("[進捗] 応答を準備中...");
             newChatButton.setDisable(true);
             // bind中のプロパティは直接setDisableできないためunbindしてから無効化
             deleteChatButton.disableProperty().unbind();
@@ -252,14 +259,18 @@ public class App extends Application {
             Thread.ofVirtual().start(() -> {
                 activeInteractor.startUserMessageStream(
                     userInput,
-                    token -> Platform.runLater(() -> chatHistory.appendStreamingToken(token)),
+                    token -> {},
+                    progressText -> Platform.runLater(() -> {
+                        progressLabel.setText("[進捗] " + progressText);
+                    }),
                     () -> Platform.runLater(() -> {
-                        // 完了時: ハイライト付き全文再描画
+                        // 完了時: WebViewを再描画
+                        progressLabel.setVisible(false);
+                        progressLabel.setManaged(false);
+                        progressLabel.setText("");
                         if (interactorRef.get() == activeInteractor) {
-                            chatHistory.updateTranscript(activeInteractor.getTranscript());
                             updateWebPreview(webEngine, activeInteractor.getTranscript());
                         } else {
-                            chatHistory.updateTranscript(interactorRef.get().getTranscript());
                             updateWebPreview(webEngine, interactorRef.get().getTranscript());
                         }
                         refreshSessionsRef[0].run();
@@ -275,7 +286,14 @@ public class App extends Application {
                         inputField.requestFocus();
                     }),
                     error -> Platform.runLater(() -> {
-                        chatHistory.appendStreamingToken("\n\n(エラー) " + error.getMessage());
+                        progressLabel.setVisible(false);
+                        progressLabel.setManaged(false);
+                        progressLabel.setText("");
+                        Alert alert = new Alert(Alert.AlertType.ERROR);
+                        alert.setTitle("エラー");
+                        alert.setHeaderText("応答中にエラーが発生しました");
+                        alert.setContentText(error.getMessage());
+                        alert.showAndWait();
                         inputField.setDisable(false);
                         sendButton.setDisable(false);
                         sendButton.setText("送信");
@@ -298,9 +316,10 @@ public class App extends Application {
         });
 
         HBox inputRow = new HBox(8, inputField, sendButton);
+        VBox bottomBox = new VBox(4, progressLabel, inputRow);
         BorderPane chatPane = new BorderPane();
         chatPane.setCenter(webView);
-        chatPane.setBottom(inputRow);
+        chatPane.setBottom(bottomBox);
 
         SplitPane splitPane = new SplitPane(historyPane, chatPane);
         splitPane.setDividerPositions(0.24);
@@ -361,7 +380,11 @@ public class App extends Application {
 
         // 全コピーボタン：現在の会話履歴をクリップボードにコピー
         Button copyAllButton = new Button("全コピー");
-        copyAllButton.setOnAction(event -> chatHistory.copyToClipboard());
+        copyAllButton.setOnAction(event -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(interactorRef.get().getTranscript());
+            Clipboard.getSystemClipboard().setContent(content);
+        });
         // 最新ターンコピーボタンは不要になったため、単に全コピーボタンのみ表示
         topBar.getChildren().add(copyAllButton);
 
@@ -384,7 +407,6 @@ public class App extends Application {
         ChatService chatService,
         ConversationStore conversationStore,
         AtomicReference<ChatInteractor> interactorRef,
-        ChatDisplayPane chatHistory,
         WebEngine webEngine,
         Runnable refreshSessions,
         Label baseDirLabel,
@@ -404,7 +426,6 @@ public class App extends Application {
             sessionId);
 
         interactorRef.set(selectedInteractor);
-        chatHistory.updateTranscript(selectedInteractor.getTranscript());
         updateWebPreview(webEngine, selectedInteractor.getTranscript());
         baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
 

@@ -226,9 +226,18 @@ public class ChatInteractor {
      * @param onComplete 処理完了時コールバック
      * @param onError   エラー時コールバック
      */
-    public void startUserMessageStream(
+        /**
+         * ストリーミングでユーザーメッセージを処理する（進捗コールバック対応）。
+         * @param rawInput ユーザー入力
+         * @param onToken トークン到着時コールバック
+         * @param onProgress ツール実行進捗コールバック（ツール名が切り替わるたび呼ばれる）
+         * @param onComplete 完了時コールバック
+         * @param onError エラー時コールバック
+         */
+        public void startUserMessageStream(
             String rawInput,
             Consumer<String> onToken,
+            Consumer<String> onProgress,
             Runnable onComplete,
             Consumer<Throwable> onError) {
 
@@ -338,8 +347,20 @@ public class ChatInteractor {
                 ExecutionLogger.logReply(fullLlmText);
                 onComplete.run();
             },
-            onError
+            onError,
+            onProgress
         );
+    }
+
+    /**
+     * 進捗コールバックなしの従来版（後方互換）
+     */
+    public void startUserMessageStream(
+            String rawInput,
+            Consumer<String> onToken,
+            Runnable onComplete,
+            Consumer<Throwable> onError) {
+        startUserMessageStream(rawInput, onToken, null, onComplete, onError);
     }
 
     /**

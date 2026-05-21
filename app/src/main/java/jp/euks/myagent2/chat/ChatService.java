@@ -42,12 +42,17 @@ public interface ChatService {
      * @param onComplete  応答全体が完了したときに呼ばれるコールバック（引数は LLM テキスト全文）
      * @param onError     エラー時に呼ばれるコールバック
      */
+    /**
+     * 進捗通知対応版（ツール実行名を逐次通知）。
+     * 既定実装は onProgress を無視し、従来通り一括応答。
+     */
     default void streamReplyToWithHistory(
             List<ChatMessage> history,
             String userMessage,
             Consumer<String> onToken,
             Consumer<String> onComplete,
-            Consumer<Throwable> onError) {
+            Consumer<Throwable> onError,
+            Consumer<String> onProgress) {
         try {
             String result = replyToWithHistory(history, userMessage);
             onToken.accept(result);
@@ -55,6 +60,18 @@ public interface ChatService {
         } catch (Exception e) {
             onError.accept(e);
         }
+    }
+
+    /**
+     * 従来のstreamReplyToWithHistory（onProgressなし）
+     */
+    default void streamReplyToWithHistory(
+            List<ChatMessage> history,
+            String userMessage,
+            Consumer<String> onToken,
+            Consumer<String> onComplete,
+            Consumer<Throwable> onError) {
+        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, null);
     }
 
     /**

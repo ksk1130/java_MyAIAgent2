@@ -223,26 +223,50 @@ public class OpenAiCompatibleChatService implements ChatService {
         return toolExecutionTracker;
     }
 
-    @Override
+    /**
+     * ストリーミング応答＋進捗通知対応。
+     * @param history チャット履歴
+     * @param userMessage ユーザー発話
+     * @param onToken トークン逐次通知
+     * @param onComplete 応答完了時
+     * @param onError エラー時
+     * @param onProgress ツール実行進捗通知（ツール名が切り替わるたび呼ばれる）
+     */
     public void streamReplyToWithHistory(
             List<ChatMessage> history,
             String userMessage,
             Consumer<String> onToken,
             Consumer<String> onComplete,
-            Consumer<Throwable> onError) {
+            Consumer<Throwable> onError,
+            Consumer<String> onProgress) {
         restoreMemory(history);
         toolExecutionTracker.clear();
-        // トークンを逐次 onToken に通知し、完了時に onComplete へ全文テキストを渡す
         StringBuilder accumulated = new StringBuilder();
+        final int[] reportedToolCount = new int[] {0};
         streamingAssistant.chat(userMessage)
             .onPartialResponse(token -> {
                 accumulated.append(token);
                 onToken.accept(token);
             })
             .onRetrieved(ignored -> {})
-            .onToolExecuted(ignored -> {})
+            .onToolExecuted(ignored -> {
+                // LangChain4j 1.12.2 では onToolExecution が無いため、実行完了通知で進捗表示を更新する。
+                if (onProgress == null) {
+                    return;
+                }
+                var executions = toolExecutionTracker.getExecutions();
+                if (executions.size() <= reportedToolCount[0]) {
+                    return;
+                }
+                for (int i = reportedToolCount[0]; i < executions.size(); i++) {
+                    String toolName = executions.get(i).toolName();
+                    if (toolName != null && !toolName.isBlank()) {
+                        onProgress.accept(toolName + "実行中...");
+                    }
+                }
+                reportedToolCount[0] = executions.size();
+            })
             .onCompleteResponse(ignored -> {
-                // OpenAI互換ストリームが空完了した場合は同期呼び出しへフォールバックする
                 if (accumulated.isEmpty()) {
                     try {
                         String result = assistant.chat(userMessage);
@@ -256,7 +280,6 @@ public class OpenAiCompatibleChatService implements ChatService {
                 onComplete.accept(accumulated.toString());
             })
             .onError(err -> {
-                // ストリーミング非対応エンドポイントへのフォールバック（同期呼び出し）
                 try {
                     accumulated.setLength(0);
                     String result = assistant.chat(userMessage);
