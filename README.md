@@ -3,6 +3,7 @@
 JavaFX で構築したデスクトップ向け AI チャットエージェントです。  
 OpenAI 互換エンドポイントに接続し、ツール呼び出し（検索・Git参照・ファイルI/O・ローカルコマンド）を安全制約付きで実行できます。  
 会話履歴の保存、システムプロンプト編集、ストリーミング表示にも対応しています。
+Office/PDF 等のバイナリ読込（`readbinary`）にも対応し、抽出可能な形式は本文テキストとして扱えます。  
 さらに WebView タブで会話のHTMLプレビュー表示も可能です。
 
 ## 目次
@@ -45,6 +46,7 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
   - Ctrl+Enter で送信
   - Shift+Enter で改行
   - WebView タブで会話プレビュー表示
+  - ツール実行結果の折りたたみ表示
 - 応答生成
   - 非同期処理（UI ブロック回避）
   - ストリーミング逐次表示
@@ -56,6 +58,8 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
   - ワークスペース内検索
   - Git 履歴参照
   - ファイル読み書き
+  - Excel の範囲読取
+  - バイナリファイル読取（Office/PDF/画像）
   - ローカルコマンド実行（許可制）
 - 運用機能
   - 会話履歴の保存・再読込
@@ -69,6 +73,8 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
 - UI: JavaFX 21.0.3（controls / fxml / media / web）
 - LLM 連携: LangChain4j 1.12.2
 - JSON: Gson
+- 文書抽出: Apache POI / Apache Tika
+- ログ: Log4j2 + SLF4J
 - テスト: JUnit 4
 - テキストエリア装飾: RichTextFX
 
@@ -81,7 +87,8 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
 
 補足:
 
-- Windows ARM64 環境では JavaFX プラグイン制約を回避する構成を採用しています。
+- Windows ARM64 環境では JavaFX プラグイン非依存の構成を採用しています。
+- 実行時は JavaFX モジュール（controls/fxml/media/web）を JVM 引数で明示して起動します。
 
 ## セットアップ
 
@@ -120,6 +127,8 @@ gradlew :app:run
   - `/tool grep キーワード`
   - `/tool gitlog App.java`
   - `/tool readfile 相対パス`
+  - `/tool readexcel sample.xlsx Sheet1 A1:C10`
+  - `/tool readbinary docs/spec.pdf`
   - `/tool setdir ディレクトリパス`
 
 ディレクトリ切替:
@@ -141,6 +150,8 @@ gradlew :app:run
 - `setdir`
 - `getdir`
 - `readfile`
+- `readexcel`
+- `readbinary`
 
 LLM 自動実行（Function Calling）:
 
@@ -150,6 +161,8 @@ LLM 自動実行（Function Calling）:
 - `gitshow`
 - `gitbranch`
 - `readfile`
+- `readexcel`
+- `readbinary`
 - `writefile`
 - `localcmd`
 
@@ -162,6 +175,9 @@ LLM 自動実行（Function Calling）:
   - 省略時は OpenAI 既定 URL
 - `MYAGENT2_MODEL`
   - 省略時は既定モデル名を使用
+- `MYAGENT2_CMD_TIMEOUT_SECONDS`（任意）
+  - `localcmd` 実行タイムアウト秒数（1〜30）
+  - 未設定時は 20 秒
 
 例（PowerShell）:
 
@@ -169,6 +185,7 @@ LLM 自動実行（Function Calling）:
 $env:MYAGENT2_API_KEY="your_api_key"
 $env:MYAGENT2_BASE_URL="https://your-endpoint/v1"
 $env:MYAGENT2_MODEL="gpt-4o-mini"
+$env:MYAGENT2_CMD_TIMEOUT_SECONDS="20"
 ```
 
 ## 配布物の作成方法
@@ -217,9 +234,9 @@ gradlew :app:test
 
 ローカルコマンド実行は以下の制限があります。
 
-- 許可コマンド限定（`git` / `grep` / `rg`）
+- 許可コマンド限定（`git`, `grep`, `rg`, `ls`, `find`, `cat`, `head`, `tail`, `wc`, `stat`, `diff`, `sort`, `uniq`, `cut`, `tree`, `basename`, `dirname`, `realpath`）
 - 危険なシェルメタ文字を拒否
-- タイムアウト設定（固定秒数）
+- タイムアウト設定（既定 20 秒、最大 30 秒）
 - 出力行数・出力量の上限設定
 
 
@@ -229,6 +246,13 @@ gradlew :app:test
 - 相対パスを基本とした運用
 - 読み取り時の文字コードフォールバック（UTF-8 優先、Shift_JIS 対応）
 - `/tool grep` は各ファイルを「UTF-8→Shift_JIS（CP932）」の順で自動判定し、どちらかで正しく読めた場合のみ検索対象とします。UTF-8/SJIS混在プロジェクトでも横断検索できます。
+
+`readbinary` は以下の制限で動作します。
+
+- 対応拡張子: `pdf`, `png`, `jpg`, `jpeg`, `xlsx`, `docx`, `pptx`
+- サイズ上限: 10MB
+- ベースディレクトリ外のパスは禁止
+- `docx` / `xlsx` / `pptx` / `pdf` は本文抽出を優先し、抽出不可時のみ base64 を返す
 
 ## トラブルシューティング
 
