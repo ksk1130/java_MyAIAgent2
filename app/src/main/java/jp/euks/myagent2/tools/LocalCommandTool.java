@@ -33,6 +33,17 @@ public class LocalCommandTool {
     private static final int MAX_OUTPUT_LINES = 1000;
     private static final int MAX_OUTPUT_CHARS = 100_000;
     private static final String ADDONS_DIR_NAME = "addons";
+    /**
+     * addons 探索の既定ディレクトリ。
+     * 起動時の user.dir を基準に固定し、セッション切替で作業ディレクトリが変わっても
+     * ツール探索先が変化しないようにする。
+     */
+    private static final Path DEFAULT_ADDONS_DIR = Path
+        .of(System.getProperty("user.dir"))
+        .toAbsolutePath()
+        .normalize()
+        .resolve(ADDONS_DIR_NAME)
+        .normalize();
 
     /** 許可するコマンド（小文字）。 */
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
@@ -92,8 +103,21 @@ public class LocalCommandTool {
      * @param baseDir コマンドの実行ディレクトリ（基点）
      */
     public LocalCommandTool(Path baseDir) {
+        this(baseDir, DEFAULT_ADDONS_DIR);
+    }
+
+    /**
+     * コンストラクタ。
+     *
+     * @param baseDir コマンドの実行ディレクトリ（基点）
+     * @param addonsDir 実行ファイル探索用 addons ディレクトリ（null の場合は起動時 user.dir/addons）
+     */
+    public LocalCommandTool(Path baseDir, Path addonsDir) {
         this.baseDir = baseDir.toAbsolutePath().normalize();
-        this.addonsDir = this.baseDir.resolve(ADDONS_DIR_NAME).normalize();
+        Path resolvedAddonsDir = (addonsDir == null)
+            ? DEFAULT_ADDONS_DIR
+            : addonsDir.toAbsolutePath().normalize();
+        this.addonsDir = resolvedAddonsDir;
         ensureAddonsDirExists();
         this.resolvedExes = buildResolvedExes();
         this.commandTimeoutSeconds = resolveCommandTimeoutSeconds();

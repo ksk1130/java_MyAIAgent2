@@ -212,9 +212,10 @@ public class LocalCommandToolTest {
     @Test
     public void testConstructorCreatesAddonsDirectory() throws Exception {
         Path tempDir = Files.createTempDirectory("localcmd-addons-test-");
+        Path addonsDir = tempDir.resolve("addons");
         try {
-            new LocalCommandTool(tempDir);
-            assertTrue(Files.isDirectory(tempDir.resolve("addons")));
+            new LocalCommandTool(tempDir, addonsDir);
+            assertTrue(Files.isDirectory(addonsDir));
         } finally {
             cleanupDirectory(tempDir);
         }
@@ -229,10 +230,31 @@ public class LocalCommandToolTest {
             Path rgExe = addons.resolve("rg.exe");
             Files.writeString(rgExe, "dummy");
 
-            LocalCommandTool tool = new LocalCommandTool(tempDir);
+            LocalCommandTool tool = new LocalCommandTool(tempDir, addons);
             assertEquals(rgExe.toString(), tool.getResolvedExe("rg"));
         } finally {
             cleanupDirectory(tempDir);
+        }
+    }
+
+    @Test
+    public void testResolvedExeUsesFixedAddonsAcrossDifferentBaseDirs() throws Exception {
+        Path baseDir1 = Files.createTempDirectory("localcmd-basedir1-");
+        Path baseDir2 = Files.createTempDirectory("localcmd-basedir2-");
+        Path fixedAddonsDir = Files.createTempDirectory("localcmd-fixed-addons-");
+        try {
+            Path rgExe = fixedAddonsDir.resolve("rg.exe");
+            Files.writeString(rgExe, "dummy");
+
+            LocalCommandTool tool1 = new LocalCommandTool(baseDir1, fixedAddonsDir);
+            LocalCommandTool tool2 = new LocalCommandTool(baseDir2, fixedAddonsDir);
+
+            assertEquals(rgExe.toString(), tool1.getResolvedExe("rg"));
+            assertEquals(rgExe.toString(), tool2.getResolvedExe("rg"));
+        } finally {
+            cleanupDirectory(baseDir1);
+            cleanupDirectory(baseDir2);
+            cleanupDirectory(fixedAddonsDir);
         }
     }
 
