@@ -234,10 +234,11 @@ gradlew :app:test
 
 ローカルコマンド実行は以下の制限があります。
 
-- 許可コマンド限定（`git`, `grep`, `rg`, `ls`, `find`, `cat`, `head`, `tail`, `wc`, `stat`, `diff`, `sort`, `uniq`, `cut`, `tree`, `basename`, `dirname`, `realpath`）
+- 許可コマンド限定（`git`, `grep`, `rg`, `nkf`, `ls`, `find`, `cat`, `head`, `tail`, `wc`, `stat`, `diff`, `sort`, `uniq`, `cut`, `tree`, `basename`, `dirname`, `realpath`）
 - 危険なシェルメタ文字を拒否
 - タイムアウト設定（既定 20 秒、最大 30 秒）
 - 出力行数・出力量の上限設定
+- `nkf` は `--overwrite` を含む上書き変換も利用可能
 
 
 ファイル操作・grep検索は以下の方針です。

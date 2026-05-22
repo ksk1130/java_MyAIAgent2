@@ -250,10 +250,12 @@ public class LocalCommandToolTest {
     }
 
     @Test
-    public void testNkfForbiddenOptionIsBlocked() {
+    public void testNkfOverwriteOptionIsAllowed() {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         String result = tool.execute("nkf --overwrite sample.txt");
-        assertTrue(result, result.contains("nkf の禁止オプション"));
+
+        // 実ファイルの有無で結果は変わりうるが、禁止オプション扱いではないことを確認する
+        assertFalse(result, result.contains("nkf の禁止オプション"));
     }
 
     @Test

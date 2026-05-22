@@ -32,11 +32,10 @@ public class OpenAiCompatibleChatService implements ChatService {
 - `readfile` / `writefile` — ファイルの読み取り／書き込み（書き込みは慎重に）
 - `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（表の一部抽出用途）
 - `readbinary` — Office/PDF は本文抽出テキストを返す。抽出不能な形式のみ base64 を返す
-- `localcmd` — ローカルコマンド実行（許可: git/grep/rg/nkf/ls/find/cat/head/tail/wc/stat/diff/sort/uniq/cut/tree/basename/dirname/realpath、非破壊系のコマンドのみ、一部禁止文字あり、タイムアウト有り）
+- `localcmd` — ローカルコマンド実行（許可: git/grep/rg/nkf/ls/find/cat/head/tail/wc/stat/diff/sort/uniq/cut/tree/basename/dirname/realpath、基本は参照系だが nkf の `--overwrite` は可、一部禁止文字あり、タイムアウト有り）
 
 補足:
 - `nkf` は `localcmd` 経由で利用可能。`/tool cmd nkf --version` のように実行できる。
-- `nkf` の上書き系オプション（`--overwrite`, `--in-place`）は禁止。
 
 運用ルール:
 1) 可能な限り利用可能なツールを活用すること

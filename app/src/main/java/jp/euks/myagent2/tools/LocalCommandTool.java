@@ -54,11 +54,6 @@ public class LocalCommandTool {
         "sort", "uniq", "cut",
         "tree", "basename", "dirname", "realpath"));
 
-    /** nkf で禁止する上書き系オプション。 */
-    private static final Set<String> NKF_FORBIDDEN_OPTIONS = new HashSet<>(Arrays.asList(
-        "--overwrite",
-        "--in-place"));
-
     /** git で許可するサブコマンド（読み取り専用）。 */
     private static final Set<String> ALLOWED_GIT_SUBCOMMANDS = new HashSet<>(
         Arrays.asList(
@@ -402,17 +397,6 @@ public class LocalCommandTool {
             for (int i = 1; i < parts.length; i++) {
                 if (!parts[i].startsWith("-") && parts[i].contains("..")) {
                     return "(error) パストラバーサルが含まれています: " + parts[i];
-                }
-            }
-        }
-
-        // nkf の場合、上書き系オプションを禁止（stdout への変換結果出力のみ許可）
-        if ("nkf".equals(baseCommand)) {
-            for (int i = 1; i < parts.length; i++) {
-                String option = parts[i].toLowerCase();
-                if (NKF_FORBIDDEN_OPTIONS.contains(option)) {
-                    return "(error) nkf の禁止オプションです: " + parts[i]
-                        + "（上書き保存は使用不可）";
                 }
             }
         }

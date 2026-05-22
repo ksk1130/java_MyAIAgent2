@@ -350,7 +350,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool gitlog [file]         ファイル未指定時は全ブランチ・マージ履歴をグラフ表示\n"
                 + "  - /tool gitshow <ref> [-- file]\n"
                 + "  - /tool gitbranch              ローカル・リモートブランチ一覧\n"
-                + "  - /tool cmd <command> [args]   ローカルコマンド実行（git/grep/rg/nkf ほか）\n"
+                + "  - /tool cmd <command> [args]   ローカルコマンド実行（git/grep/rg/nkf ほか。nkf は --overwrite も可）\n"
                 + "  - /tool setdir <path>          作業ディレクトリを変更する\n"
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
                 + "  - /tool readfile <path>        テキストファイルを読み込む\n"
