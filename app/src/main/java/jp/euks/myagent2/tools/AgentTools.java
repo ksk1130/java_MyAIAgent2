@@ -335,8 +335,8 @@ public class AgentTools {
         return result;
     }
 
-    @Tool("ローカルコマンド（git, grep, rg）を実行する。シェルメタ文字は拒否。タイムアウト: 5秒、出力上限: 1000行/100KB。")
-    public String localcmd(@P("実行するコマンド（例: git log -10, grep pattern file）") String command) {
+    @Tool("ローカルコマンド（git, grep, rg, nkf, ls, find, cat, head, tail, wc, stat, diff, sort, uniq, cut, tree, basename, dirname, realpath）を実行する。シェルメタ文字は拒否。タイムアウト: 既定20秒（最大30秒）、出力上限: 1000行/100KB。")
+    public String localcmd(@P("実行するコマンド（例: git log -10, grep pattern file, nkf --version）") String command) {
         if (localCommandTool == null) {
             return "(error) localcmdツールが設定されていません";
         }

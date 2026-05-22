@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
  * ローカルコマンド実行用ツール。
  *
  * <p>
- * 許可された読み取り専用コマンド（git, grep, ls, find, cat など）のみを実行。
+ * 許可された読み取り専用コマンド（git, grep, nkf, ls, find, cat など）のみを実行。
  * シェルメタ文字を拒否し、タイムアウト・出力上限・パストラバーサル・機密ファイル保護を設定。
  * Windows + Git Bash 環境では Unix コマンドを Git Bash バイナリから自動解決する。
  */
@@ -47,12 +47,17 @@ public class LocalCommandTool {
 
     /** 許可するコマンド（小文字）。 */
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
-        "git", "grep", "rg",
+        "git", "grep", "rg", "nkf",
         "ls", "find",
         "cat", "head", "tail",
         "wc", "stat", "diff",
         "sort", "uniq", "cut",
         "tree", "basename", "dirname", "realpath"));
+
+    /** nkf で禁止する上書き系オプション。 */
+    private static final Set<String> NKF_FORBIDDEN_OPTIONS = new HashSet<>(Arrays.asList(
+        "--overwrite",
+        "--in-place"));
 
     /** git で許可するサブコマンド（読み取り専用）。 */
     private static final Set<String> ALLOWED_GIT_SUBCOMMANDS = new HashSet<>(
@@ -70,7 +75,7 @@ public class LocalCommandTool {
 
     /** ファイル内容を読み取るコマンド（パス引数の安全チェック対象）。 */
     private static final Set<String> FILE_READING_COMMANDS = new HashSet<>(Arrays.asList(
-        "cat", "head", "tail", "wc", "stat", "diff", "sort", "uniq", "cut"));
+        "cat", "head", "tail", "wc", "stat", "diff", "sort", "uniq", "cut", "nkf"));
 
     /** アクセスを禁止する機密ファイルパターン（大文字小文字無視）。 */
     private static final Pattern SENSITIVE_FILE_PATTERN = Pattern.compile(
@@ -189,6 +194,8 @@ public class LocalCommandTool {
         exes.put("grep", resolveAddonOrDefaultExe("grep", resolveGrepExe()));
         // rg も PATH チェックを優先
         exes.put("rg", resolveAddonOrDefaultExe("rg", resolveRgExe()));
+        // nkf は addons を優先し、なければ PATH 解決に委譲
+        exes.put("nkf", resolveAddonOrDefaultExe("nkf", "nkf"));
         // その他の Unix コマンドは Git Bash から解決
         for (String cmd : Arrays.asList(
                 "ls", "find", "cat", "head", "tail",
@@ -395,6 +402,17 @@ public class LocalCommandTool {
             for (int i = 1; i < parts.length; i++) {
                 if (!parts[i].startsWith("-") && parts[i].contains("..")) {
                     return "(error) パストラバーサルが含まれています: " + parts[i];
+                }
+            }
+        }
+
+        // nkf の場合、上書き系オプションを禁止（stdout への変換結果出力のみ許可）
+        if ("nkf".equals(baseCommand)) {
+            for (int i = 1; i < parts.length; i++) {
+                String option = parts[i].toLowerCase();
+                if (NKF_FORBIDDEN_OPTIONS.contains(option)) {
+                    return "(error) nkf の禁止オプションです: " + parts[i]
+                        + "（上書き保存は使用不可）";
                 }
             }
         }

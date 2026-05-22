@@ -103,6 +103,15 @@ public class LocalCommandToolTest {
     }
 
     @Test
+    public void testExecuteAllowsNkfCommand() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("nkf --version");
+
+        // nkf が存在しなくても「許可されていない」にはならないことを確認
+        assertFalse(result, result.contains("許可されていないコマンドです"));
+    }
+
+    @Test
     public void testResolvedGrepExeIsNotNull() {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         // resolvedGrepExe は必ず非 null の文字列を返す
@@ -229,12 +238,22 @@ public class LocalCommandToolTest {
             Files.createDirectories(addons);
             Path rgExe = addons.resolve("rg.exe");
             Files.writeString(rgExe, "dummy");
+            Path nkfExe = addons.resolve("nkf.exe");
+            Files.writeString(nkfExe, "dummy");
 
             LocalCommandTool tool = new LocalCommandTool(tempDir, addons);
             assertEquals(rgExe.toString(), tool.getResolvedExe("rg"));
+            assertEquals(nkfExe.toString(), tool.getResolvedExe("nkf"));
         } finally {
             cleanupDirectory(tempDir);
         }
+    }
+
+    @Test
+    public void testNkfForbiddenOptionIsBlocked() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("nkf --overwrite sample.txt");
+        assertTrue(result, result.contains("nkf の禁止オプション"));
     }
 
     @Test
