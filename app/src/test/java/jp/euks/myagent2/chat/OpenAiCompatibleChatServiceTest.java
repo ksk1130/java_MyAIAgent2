@@ -7,6 +7,7 @@ import static org.junit.Assert.assertFalse;
 import java.nio.file.Path;
 
 import jp.euks.myagent2.tools.AgentTools;
+import jp.euks.myagent2.tools.BinaryAttachmentStore;
 import jp.euks.myagent2.tools.ExcelReaderTool;
 import jp.euks.myagent2.tools.GitLogTool;
 import jp.euks.myagent2.tools.LocalCommandTool;
@@ -127,5 +128,35 @@ public class OpenAiCompatibleChatServiceTest {
         assertTrue(result, result.contains("sheet: Sheet1"));
         assertTrue(result, result.contains("row 1: A1 | B1"));
         assertTrue(result, result.contains("row 2: A2 | "));
+    }
+
+    @Test
+    public void testAgentToolsReadBinaryIncludesExtractedTextForExcel() throws Exception {
+        Path tempDir = java.nio.file.Files.createTempDirectory("agent-tools-readbinary-excel");
+        Path workbookPath = tempDir.resolve("Book.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Summary");
+            sheet.createRow(0).createCell(0).setCellValue("売上");
+            sheet.getRow(0).createCell(1).setCellValue("100");
+            try (java.io.OutputStream outputStream = java.nio.file.Files.newOutputStream(workbookPath)) {
+                workbook.write(outputStream);
+            }
+        }
+
+        AgentTools tools = new AgentTools(
+            null,
+            null,
+            null,
+            null,
+            null,
+            new ExcelReaderTool(tempDir),
+            new BinaryAttachmentStore(tempDir),
+            null);
+
+        String result = tools.readbinary("Book.xlsx");
+
+        assertTrue(result, result.contains("extracted_text="));
+        assertTrue(result, result.contains("売上"));
+        assertFalse(result, result.contains("base64="));
     }
 }

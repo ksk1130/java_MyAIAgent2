@@ -24,6 +24,7 @@ public class ExcelReaderTool {
     private static final Pattern RANGE_PATTERN = Pattern.compile("^([A-Za-z]+\\d+):([A-Za-z]+\\d+)$");
     private static final Set<String> ALLOWED_EXTS = Set.of("xlsx", "xlsm", "xls");
     private static final int MAX_CELLS = 400;
+    private static final int MAX_SUMMARY_CELLS = 400;
 
     private final Path baseDir;
 
@@ -103,6 +104,72 @@ public class ExcelReaderTool {
             }
         } catch (Exception e) {
             return "ERROR: Failed to read Excel file: " + e.getMessage();
+        }
+    }
+
+    /**
+     * ブック全体を要約向けのテキストとして抽出する。
+     * 非空セルを先頭から最大 MAX_SUMMARY_CELLS 個まで収集する。
+     *
+     * @param path Excel ブックのパス
+     * @return 抽出結果またはエラーメッセージ
+     */
+    public String readWorkbookSummary(String path) {
+        try {
+            Path workbookPath = resolvePath(path);
+            if (!Files.exists(workbookPath)) {
+                return "ERROR: File not found: " + path;
+            }
+
+            String ext = getExtension(workbookPath);
+            if (ext == null || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
+                return "ERROR: extension not allowed: " + (ext == null ? "(none)" : ext);
+            }
+
+            try (InputStream inputStream = Files.newInputStream(workbookPath);
+                 Workbook workbook = WorkbookFactory.create(inputStream)) {
+                DataFormatter formatter = new DataFormatter(Locale.ROOT);
+                FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
+                StringBuilder result = new StringBuilder();
+                result.append("file: ").append(workbookPath.getFileName()).append('\n');
+
+                int collected = 0;
+                for (Sheet sheet : workbook) {
+                    result.append("sheet: ").append(sheet.getSheetName()).append('\n');
+                    for (Row row : sheet) {
+                        StringBuilder rowText = new StringBuilder();
+                        boolean hasValue = false;
+                        for (Cell cell : row) {
+                            String value = formatter.formatCellValue(cell, evaluator).trim();
+                            if (value.isEmpty()) {
+                                continue;
+                            }
+                            if (hasValue) {
+                                rowText.append(" | ");
+                            }
+                            rowText.append(value.replace("\r", " ").replace("\n", "\\n"));
+                            hasValue = true;
+                            collected++;
+                            if (collected >= MAX_SUMMARY_CELLS) {
+                                break;
+                            }
+                        }
+                        if (hasValue) {
+                            result.append("row ").append(row.getRowNum() + 1).append(": ").append(rowText).append('\n');
+                        }
+                        if (collected >= MAX_SUMMARY_CELLS) {
+                            break;
+                        }
+                    }
+                    if (collected >= MAX_SUMMARY_CELLS) {
+                        result.append("... truncated ...\n");
+                        break;
+                    }
+                }
+                return result.toString().trim();
+            }
+        } catch (Exception e) {
+            return "ERROR: Failed to read Excel workbook: " + e.getMessage();
         }
     }
 

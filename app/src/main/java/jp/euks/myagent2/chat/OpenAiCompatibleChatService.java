@@ -30,24 +30,30 @@ public class OpenAiCompatibleChatService implements ChatService {
 - `grep` / `WorkspaceGrepTool` — ワークスペース内検索（参照のみ） rgコマンドが利用可能な場合はrgを優先して使用すること
 - `gitlog` / `gitshow` / `gitbranch` — Git の読み取り系操作（参照のみ）
 - `readfile` / `writefile` — ファイルの読み取り／書き込み（書き込みは慎重に）
-- `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（参照のみ）
+- `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（表の一部抽出用途）
+- `readbinary` — Office/PDF は本文抽出テキストを返す。抽出不能な形式のみ base64 を返す
 - `localcmd` — ローカルコマンド実行（許可: git/grepほか、非破壊系のコマンドのみ、一部禁止文字あり、タイムアウト有り）
 
 運用ルール:
 1) 可能な限り利用可能なツールを活用すること
-2) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
+2) ユーザーが「XXX.xlsxを要約して」「このExcelを要約」など、**ファイル全体の要約/説明**を依頼した場合は `readexcel` ではなく **`readbinary` を最優先**で使うこと。
+    - 先に `readbinary <path>` を実行し、返ってきた `extracted_text` を使って要約を続行する。
+    - `extracted_text` がある場合はそれを最優先し、`base64` は内容理解に使わない。
+    - `[[ATTACH:...]]` トークンは使わないこと。
+    - `readexcel` は「Sheet名とセル範囲が明示されている」「特定範囲の集計・確認」など部分抽出の依頼時のみ使うこと。
+3) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
    a) 思考プロセスを必ず表示：「<ユーザーキーワード>から以下のパターンで検索します」と、読み替え理由を含めてキーワード一覧を明示する
       例1:「APIキーを探して」→「APIキー は英語では apiKey, API_KEY, api_key, ApiKey などが考えられるため、以下のパターンで検索します：apiKey, API_KEY, api_key, ApiKey」
       例2:「パス区切りを探して」→「パス区切りはプログラムでは normalizePath, normalize, separator, pathSeparator などの関数や変数で扱われるため、以下のパターンで検索します：normalize, separator, pathSeparator, normalizePath」
    b) 複数パターンで `grep` を実行（rgコマンドが使える場合はrgを優先）。例: `grep -rE "apiKey|API_KEY|api_key|ApiKey" .`
    c) すべての grep 結果を収集して、重複を排除してまとめる
    d) 統一的な形式で提示する
-3) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
-4) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること。
-5) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること。
-6) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
-7) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
-8) ツール実行結果（`localcmd` の結果など）は、ユーザーにわかりやすく回答に含めること。実行コマンドと出力結果の両方を提示する。
+4) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
+5) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること。
+6) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること。
+7) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
+8) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
+9) ツール実行結果（`localcmd` の結果など）は、ユーザーにわかりやすく回答に含めること。実行コマンドと出力結果の両方を提示する。
 
 回答フォーマット（優先順）:
 - 1行要約: 結論や提案の短い要点
@@ -170,6 +176,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             fileWriterTool,
             localCommandTool,
             new ExcelReaderTool(),
+            new BinaryAttachmentStore(Path.of(System.getProperty("user.dir"))),
             toolExecutionTracker);
 
         // AiServices で Assistant インターフェース実装を生成
@@ -307,6 +314,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             new jp.euks.myagent2.tools.FileReaderTool(normalized),
             new jp.euks.myagent2.tools.FileWriterTool(normalized));
         agentTools.updateExcelToolReference(new ExcelReaderTool(normalized));
+        agentTools.updateBinaryAttachmentStore(new BinaryAttachmentStore(normalized));
     }
 
     @Override

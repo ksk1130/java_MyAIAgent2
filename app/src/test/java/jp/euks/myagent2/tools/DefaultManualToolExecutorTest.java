@@ -121,4 +121,55 @@ public class DefaultManualToolExecutorTest {
         assertTrue(result, result.contains("row 1: v11 | v12"));
         assertTrue(result, result.contains("row 2: v21 | v22"));
     }
+
+    @Test
+    public void tryExecuteRunsReadBinaryTool() throws Exception {
+        Path tempDir = Files.createTempDirectory("binary-test");
+        Path binary = tempDir.resolve("sample.pdf");
+        Files.write(binary, new byte[] {0x25, 0x50, 0x44, 0x46});
+
+        DefaultManualToolExecutor executor = new DefaultManualToolExecutor(Clock.systemUTC(), tempDir);
+
+        String result = executor.tryExecute("/tool readbinary sample.pdf").orElse("");
+
+        assertTrue(result, result.startsWith("(tool:readbinary) file=sample.pdf"));
+        assertTrue(result, result.contains("base64=") || result.contains("extracted_text="));
+    }
+
+    @Test
+    public void tryExecuteRunsReadBinaryAsExtractionForOffice() throws Exception {
+        Path tempDir = Files.createTempDirectory("binary-office-test");
+        Path workbookPath = tempDir.resolve("Book.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Sheet1");
+            sheet.createRow(0).createCell(0).setCellValue("HelloOffice");
+            try (java.io.OutputStream outputStream = Files.newOutputStream(workbookPath)) {
+                workbook.write(outputStream);
+            }
+        }
+
+        DefaultManualToolExecutor executor = new DefaultManualToolExecutor(Clock.systemUTC(), tempDir);
+
+        String result = executor.tryExecute("/tool readbinary Book.xlsx").orElse("");
+
+        assertTrue(result, result.startsWith("(tool:readbinary) file=Book.xlsx"));
+        assertTrue(result, result.contains("extracted_text="));
+        assertTrue(result, result.contains("HelloOffice"));
+        assertFalse(result, result.contains("base64="));
+    }
+
+    @Test
+    public void tryExecuteReadBinaryRejectsTooLargeFile() throws Exception {
+        Path tempDir = Files.createTempDirectory("binary-too-large-test");
+        Path binary = tempDir.resolve("large.pdf");
+        byte[] large = new byte[10 * 1024 * 1024 + 1];
+        Files.write(binary, large);
+
+        DefaultManualToolExecutor executor = new DefaultManualToolExecutor(Clock.systemUTC(), tempDir);
+
+        String result = executor.tryExecute("/tool readbinary large.pdf").orElse("");
+
+        assertTrue(result, result.contains("(tool:error)"));
+        assertTrue(result, result.contains("10MB"));
+    }
 }

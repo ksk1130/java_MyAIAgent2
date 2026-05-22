@@ -30,6 +30,8 @@ dependencies {
     implementation 'dev.langchain4j:langchain4j:1.12.2'
     implementation 'dev.langchain4j:langchain4j-open-ai:1.12.2'
     implementation 'org.apache.poi:poi-ooxml:5.4.1'
+    implementation 'org.apache.tika:tika-core:2.9.2'
+    implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'
     
     // Source: https://mvnrepository.com/artifact/org.fxmisc.richtext/richtextfx
     implementation group: 'org.fxmisc.richtext', name: 'richtextfx', version: '0.11.7'
@@ -57,7 +59,9 @@ application {
     // Force Windows console friendly encoding at JVM startup
     applicationDefaultJvmArgs = [
         '-Dfile.encoding=UTF-8',
-        '--module-path', configurations.runtimeClasspath.asPath,
+        '--module-path', "${-> configurations.runtimeClasspath
+            .filter { file -> file.name.startsWith('javafx-') }
+            .asPath}",
         '--add-modules', 'javafx.controls,javafx.fxml,javafx.media,javafx.web',
         '--add-exports', 'javafx.graphics/com.sun.javafx.sg.prism=ALL-UNNAMED'
     ]

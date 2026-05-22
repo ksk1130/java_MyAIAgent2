@@ -28,6 +28,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     private FileReaderTool fileReaderTool = new FileReaderTool();
     /** Excel 読み取りツール。 */
     private ExcelReaderTool excelReaderTool = new ExcelReaderTool();
+    /** バイナリ添付ストア。 */
+    private BinaryAttachmentStore binaryAttachmentStore;
 
     /**
      * 既定のコンストラクタ。`user.dir` を作業ディレクトリとして使用します。
@@ -85,6 +87,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         this.localCommandTool = new LocalCommandTool(this.currentDir);
         this.fileReaderTool = new FileReaderTool(this.currentDir);
         this.excelReaderTool = new ExcelReaderTool(this.currentDir);
+        this.binaryAttachmentStore = new BinaryAttachmentStore(this.currentDir);
     }
 
     @Override
@@ -137,6 +140,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
             case "getdir" -> runGetDir();
             case "readfile" -> runReadFile(args);
             case "readexcel" -> runReadExcel(args);
+            case "readbinary" -> runReadBinary(args);
             default -> "(tool:error) 未知のツールです: " + toolName + "。`/tool help` を使ってください。";
         };
     }
@@ -239,6 +243,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         localCommandTool = new LocalCommandTool(currentDir);
         fileReaderTool = new FileReaderTool(currentDir);
         excelReaderTool = new ExcelReaderTool(currentDir);
+        binaryAttachmentStore = new BinaryAttachmentStore(currentDir);
         return "(tool:setdir) 作業ディレクトリを変更しました: " + currentDir;
     }
 
@@ -270,6 +275,60 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     }
 
     /**
+     * /tool readbinary <path>
+     * バイナリファイルを base64 文字列として返します。
+     */
+    private String runReadBinary(String args) {
+        java.util.List<String> tokens = splitArgs(args);
+        if (tokens.size() != 1) {
+            return "(tool:error) readbinary には <path> が必要です。例: /tool readbinary docs/sample.pdf";
+        }
+        try {
+            BinaryAttachmentStore.AttachmentMetadata metadata = binaryAttachmentStore.createAttachment(tokens.get(0));
+            String extractedText = buildExtractionSection(tokens.get(0));
+            if (!extractedText.isEmpty()) {
+                return "(tool:readbinary) file=" + metadata.filename()
+                    + " mime=" + metadata.mimeType()
+                    + " size=" + metadata.sizeBytes()
+                    + " extracted_text=\"" + extractedText.replace("\"", "'") + "\"";
+            }
+
+            var base64Opt = binaryAttachmentStore.getBase64(metadata.id());
+            if (base64Opt.isEmpty()) {
+                return "(tool:error) readbinary の base64 変換に失敗しました";
+            }
+            return "(tool:readbinary) file=" + metadata.filename()
+                + " mime=" + metadata.mimeType()
+                + " size=" + metadata.sizeBytes()
+                + " base64=" + base64Opt.get();
+        } catch (IllegalArgumentException e) {
+            return "(tool:error) " + e.getMessage();
+        }
+    }
+
+    private String buildExtractionSection(String path) {
+        if (path == null) {
+            return "";
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (!(lower.endsWith(".xlsx")
+            || lower.endsWith(".xlsm")
+            || lower.endsWith(".xls")
+            || lower.endsWith(".docx")
+            || lower.endsWith(".pptx")
+            || lower.endsWith(".pdf"))) {
+            return "";
+        }
+
+        DocumentTextExtractor extractor = new DocumentTextExtractor(currentDir);
+        DocumentTextExtractor.ExtractResult result = extractor.extract(path);
+        if (!result.success()) {
+            return "";
+        }
+        return result.text();
+    }
+
+    /**
      * /tool getdir
      * 現在の作業ディレクトリを表示します。
      */
@@ -284,7 +343,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @return ヘルプ文字列
      */
     private String helpText() {
-        return "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel\n"
+        return "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel, readbinary\n"
                 + "  - /tool time\n"
                 + "  - /tool echo <text>\n"
                 + "  - /tool grep <query>\n"
@@ -295,7 +354,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool setdir <path>          作業ディレクトリを変更する\n"
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
                 + "  - /tool readfile <path>        テキストファイルを読み込む\n"
-                + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む";
+            + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む\n"
+                + "  - /tool readbinary <path>      Office/PDFは本文抽出、それ以外は base64 で読み込む";
     }
 
     /**

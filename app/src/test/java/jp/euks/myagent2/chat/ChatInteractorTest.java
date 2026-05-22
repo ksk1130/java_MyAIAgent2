@@ -4,12 +4,16 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import jp.euks.myagent2.session.ConversationSession;
 import jp.euks.myagent2.session.ConversationStore;
 import jp.euks.myagent2.session.SessionSummary;
+import jp.euks.myagent2.tools.BinaryAttachmentStore;
+import jp.euks.myagent2.tools.ToolExecutionTracker;
 
 import org.junit.Test;
 
@@ -245,6 +249,175 @@ public class ChatInteractorTest {
         interactor.onUserMessage("/tool setdir C:/not/exist");
 
         assertEquals(null, captured.get());
+    }
+
+    @Test
+    public void onUserMessageExpandsAttachmentTokenOnlyForModelInput() throws Exception {
+        Path tempDir = Files.createTempDirectory("interactor-attach-ok");
+        Path binary = tempDir.resolve("sample.pdf");
+        Files.write(binary, new byte[] {0x25, 0x50, 0x44, 0x46});
+        BinaryAttachmentStore store = new BinaryAttachmentStore(tempDir);
+        String id = store.createAttachment("sample.pdf").id();
+
+        FakeConversationStore conversationStore = new FakeConversationStore();
+        conversationStore.session.setWorkingDirectory(tempDir.toString());
+        java.util.concurrent.atomic.AtomicReference<String> modelInput = new java.util.concurrent.atomic.AtomicReference<>("");
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                modelInput.set(userMessage);
+                return "ok";
+            }
+
+            @Override
+            public Path getWorkingDirectory() {
+                return tempDir;
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty(), conversationStore);
+
+        String raw = "確認してください [[ATTACH:" + id + "]]";
+        interactor.onUserMessage(raw);
+
+        assertTrue(modelInput.get(), modelInput.get().contains("base64=\""));
+        ConversationSession saved = conversationStore.savedSessions.get(conversationStore.savedSessions.size() - 1);
+        assertEquals(raw, saved.messages().get(0).content());
+        assertTrue(interactor.getTranscript().contains(raw));
+    }
+
+    @Test
+    public void onUserMessageReturnsErrorForUnknownAttachmentToken() throws Exception {
+        Path tempDir = Files.createTempDirectory("interactor-attach-ng");
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                callCount.incrementAndGet();
+                return "ok";
+            }
+
+            @Override
+            public Path getWorkingDirectory() {
+                return tempDir;
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty());
+        String token = "[[ATTACH:11111111-1111-1111-1111-111111111111]]";
+
+        String turn = interactor.onUserMessage("添付 " + token);
+
+        assertTrue(turn, turn.contains("attachmentId が無効です"));
+        assertEquals(0, callCount.get());
+    }
+
+    @Test
+    public void onUserMessageRetriesWhenAssistantReturnsAttachmentToken() {
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<String> secondPrompt = new java.util.concurrent.atomic.AtomicReference<>("");
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                int n = callCount.incrementAndGet();
+                if (n == 1) {
+                    return "[[ATTACH:d1f2acb2-10c6-4937-967b-9a042cac3555]]";
+                }
+                secondPrompt.set(userMessage);
+                return "要約結果: 売上は先月比で増加しています。";
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty());
+        String turn = interactor.onUserMessage("Test.xlsxを要約して");
+
+        assertEquals(2, callCount.get());
+        assertTrue(secondPrompt.get(), secondPrompt.get().contains("回答には [[ATTACH:...]] のようなトークンを含めず"));
+        assertTrue(turn, turn.contains("要約結果: 売上は先月比で増加しています。"));
+        assertFalse(turn, turn.contains("[[ATTACH:"));
+    }
+
+    @Test
+    public void onUserMessageRetriesWhenAssistantReturnsMalformedAttachmentToken() {
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                int n = callCount.incrementAndGet();
+                if (n == 1) {
+                    return "[[ATTACH:e5e074b5-5653-4630-9df0-e3adc744b5-163]]";
+                }
+                return "要約結果: 主要な項目はすべて確認できました。";
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty());
+        String turn = interactor.onUserMessage("Test.xlsxを要約して");
+
+        assertEquals(2, callCount.get());
+        assertTrue(turn, turn.contains("要約結果: 主要な項目はすべて確認できました。"));
+        assertFalse(turn, turn.contains("[[ATTACH:"));
+    }
+
+    @Test
+    public void onUserMessageRetriesSummaryWhenReadbinaryOutputOnly() {
+        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
+        ToolExecutionTracker tracker = new ToolExecutionTracker();
+        tracker.record(
+            "readbinary",
+            "Test.xlsx",
+            "file=Test.xlsx mime=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet size=87761 base64=AAAA");
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                int n = callCount.incrementAndGet();
+                if (n == 1) {
+                    return "file=Test.xlsx mime=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet size=87761 base64=AAAA";
+                }
+                return "要約結果: 売上データは月次で増加傾向です。";
+            }
+
+            @Override
+            public ToolExecutionTracker getToolExecutionTracker() {
+                return tracker;
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty());
+        String turn = interactor.onUserMessage("Test.xlsxを要約して");
+
+        assertEquals(2, callCount.get());
+        assertTrue(turn, turn.contains("要約結果: 売上データは月次で増加傾向です。"));
     }
 
     private static final class FakeConversationStore implements ConversationStore {

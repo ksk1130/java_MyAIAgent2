@@ -2,8 +2,10 @@ package jp.euks.myagent2.tools;
 
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 
 /**
  * LLM (OpenAI 互換) が利用可能なツール群。
@@ -16,6 +18,7 @@ public class AgentTools {
     private FileWriterTool fileWriterTool;
     private LocalCommandTool localCommandTool;
     private ExcelReaderTool excelReaderTool;
+    private BinaryAttachmentStore binaryAttachmentStore;
     private final ToolExecutionTracker toolExecutionTracker;
 
     /**
@@ -54,7 +57,7 @@ public class AgentTools {
             FileWriterTool fileWriterTool,
             LocalCommandTool localCommandTool,
             ToolExecutionTracker toolExecutionTracker) {
-        this(grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, new ExcelReaderTool(), toolExecutionTracker);
+        this(grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, new ExcelReaderTool(), null, toolExecutionTracker);
     }
 
     /**
@@ -69,12 +72,28 @@ public class AgentTools {
             LocalCommandTool localCommandTool,
             ExcelReaderTool excelReaderTool,
             ToolExecutionTracker toolExecutionTracker) {
+        this(grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, excelReaderTool, null, toolExecutionTracker);
+    }
+
+    /**
+     * ツール群と tracker を全て渡すコンストラクタ（バイナリ添付対応）。
+     */
+    public AgentTools(
+            WorkspaceGrepTool grepTool,
+            GitLogTool gitTool,
+            FileReaderTool fileReaderTool,
+            FileWriterTool fileWriterTool,
+            LocalCommandTool localCommandTool,
+            ExcelReaderTool excelReaderTool,
+            BinaryAttachmentStore binaryAttachmentStore,
+            ToolExecutionTracker toolExecutionTracker) {
         this.grepTool = grepTool;
         this.gitTool = gitTool;
         this.fileReaderTool = fileReaderTool;
         this.fileWriterTool = fileWriterTool;
         this.localCommandTool = localCommandTool;
         this.excelReaderTool = excelReaderTool;
+        this.binaryAttachmentStore = binaryAttachmentStore;
         this.toolExecutionTracker = toolExecutionTracker;
     }
 
@@ -100,6 +119,13 @@ public class AgentTools {
      */
     public void updateExcelToolReference(ExcelReaderTool excelReaderTool) {
         this.excelReaderTool = excelReaderTool;
+    }
+
+    /**
+     * バイナリ添付ストア参照を差し替える。
+     */
+    public void updateBinaryAttachmentStore(BinaryAttachmentStore binaryAttachmentStore) {
+        this.binaryAttachmentStore = binaryAttachmentStore;
     }
 
     @Tool("現在の日時を取得する")
@@ -197,7 +223,7 @@ public class AgentTools {
         return result;
     }
 
-    @Tool("Excel ブックから指定シート・セル範囲の値を読み取る")
+    @Tool("Excel の指定シート・セル範囲を読み取る（部分抽出専用。ファイル全体要約には readbinary を使う）")
     public String readexcel(
             @P("Excel ブックのパス（絶対パスまたは相対パス）") String path,
             @P("シート名") String sheetName,
@@ -219,6 +245,71 @@ public class AgentTools {
             toolExecutionTracker.record("readexcel", path + " " + sheetName + " " + range, result);
         }
         return result;
+    }
+
+    @Tool("バイナリファイルを base64 で返す（xlsx等のファイル全体要約は readbinary を優先）")
+    public String readbinary(@P("読み込むバイナリファイルパス（絶対パスまたは相対パス）") String path) {
+        if (binaryAttachmentStore == null) {
+            return "(error) readbinaryツールが設定されていません";
+        }
+        if (path == null || path.isBlank()) {
+            return "(error) readbinary の path が不正です";
+        }
+        try {
+            BinaryAttachmentStore.AttachmentMetadata metadata = binaryAttachmentStore.createAttachment(path);
+            String extractionSection = buildExtractionSection(path);
+            if (!extractionSection.isEmpty()) {
+                String result = "file=" + metadata.filename()
+                    + " mime=" + metadata.mimeType()
+                    + " size=" + metadata.sizeBytes()
+                    + " extracted_text=\"" + extractionSection.replace("\"", "'") + "\"";
+                if (toolExecutionTracker != null) {
+                    toolExecutionTracker.record("readbinary", path, result);
+                }
+                return result;
+            }
+
+            var base64Opt = binaryAttachmentStore.getBase64(metadata.id());
+            if (base64Opt.isEmpty()) {
+                return "(error) readbinary の base64 変換に失敗しました";
+            }
+            String result = "file=" + metadata.filename()
+                + " mime=" + metadata.mimeType()
+                + " size=" + metadata.sizeBytes()
+                + " base64=" + base64Opt.get();
+            if (toolExecutionTracker != null) {
+                toolExecutionTracker.record("readbinary", path, result);
+            }
+            return result;
+        } catch (IllegalArgumentException e) {
+            return "(error) " + e.getMessage();
+        }
+    }
+
+    private String buildExtractionSection(String path) {
+        if (path == null) {
+            return "";
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (!(lower.endsWith(".xlsx")
+            || lower.endsWith(".xlsm")
+            || lower.endsWith(".xls")
+            || lower.endsWith(".docx")
+            || lower.endsWith(".pptx")
+            || lower.endsWith(".pdf"))) {
+            return "";
+        }
+
+        Path base = Path.of(System.getProperty("user.dir"));
+        if (binaryAttachmentStore != null && binaryAttachmentStore.baseDir() != null) {
+            base = binaryAttachmentStore.baseDir();
+        }
+        DocumentTextExtractor extractor = new DocumentTextExtractor(base);
+        DocumentTextExtractor.ExtractResult result = extractor.extract(path);
+        if (!result.success()) {
+            return "";
+        }
+        return result.text();
     }
 
     @Tool("テキストファイルに内容を保存する（許可拡張子: txt, md, csv, json, log, yaml, yml）。ワークスペースルートからの相対パスを指定すること。")

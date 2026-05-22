@@ -9,6 +9,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * UI 層と ChatService の仲介を行うインタラクタ。
@@ -17,6 +20,8 @@ import java.util.function.Consumer;
 public class ChatInteractor {
     private static final String TOOL_RESULTS_BEGIN_MARKER = "<<TOOL_RESULTS_BEGIN>>";
     private static final String TOOL_RESULTS_END_MARKER = "<<TOOL_RESULTS_END>>";
+    private static final Pattern ATTACHMENT_TOKEN_PATTERN = Pattern.compile("\\[\\[ATTACH:([a-f0-9\\-]{36})\\]\\]");
+    private static final Pattern ASSISTANT_ATTACHMENT_TOKEN_PATTERN = Pattern.compile("\\[\\[ATTACH:[^\\]]+\\]\\]", Pattern.CASE_INSENSITIVE);
 
     private final ChatService chatService;
     private final ManualToolExecutor manualToolExecutor;
@@ -24,6 +29,7 @@ public class ChatInteractor {
     private final StringBuilder transcript;
     private final List<ChatMessage> conversationHistory;
     private final ConversationSession currentSession;
+    private BinaryAttachmentStore attachmentStore;
 
     /**
      * 単純なコンストラクタ。既定の ManualToolExecutor を使用する。
@@ -114,6 +120,7 @@ public class ChatInteractor {
             }
         }
         this.currentSession = loadedSession;
+        this.attachmentStore = new BinaryAttachmentStore(getWorkingDirectory());
     }
 
     public String onUserMessage(String rawInput) {
@@ -152,8 +159,34 @@ public class ChatInteractor {
             return "You: /clear\nAssistant: 会話履歴を削除しました\n\n";
         }
 
-        String baseAssistantMessage = manualToolExecutor.tryExecute(userMessage)
-            .orElseGet(() -> chatService.replyToWithHistory(conversationHistory, userMessage));
+        var manualResult = manualToolExecutor.tryExecute(userMessage);
+        if (manualResult.isPresent()) {
+            String assistantMessage = manualResult.get();
+            syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
+            conversationHistory.add(new ChatMessage("user", userMessage));
+            conversationHistory.add(new ChatMessage("assistant", assistantMessage));
+            String turnText = "You: " + userMessage + "\n"
+                + "Assistant: " + assistantMessage + "\n\n";
+            transcript.append(turnText);
+            persistConversation();
+            ExecutionLogger.logReply(assistantMessage);
+            return turnText;
+        }
+
+        AttachmentExpansionResult expansion = expandAttachmentTokens(userMessage);
+        if (!expansion.success()) {
+            String assistantMessage = "(error) " + expansion.errorMessage();
+            conversationHistory.add(new ChatMessage("user", userMessage));
+            conversationHistory.add(new ChatMessage("assistant", assistantMessage));
+            String turnText = "You: " + userMessage + "\n"
+                + "Assistant: " + assistantMessage + "\n\n";
+            transcript.append(turnText);
+            persistConversation();
+            ExecutionLogger.logReply(assistantMessage);
+            return turnText;
+        }
+
+        String baseAssistantMessage = chatService.replyToWithHistory(conversationHistory, expansion.expandedMessage());
         String assistantMessage = baseAssistantMessage;
         String toolResultsText = "";
 
@@ -165,6 +198,7 @@ public class ChatInteractor {
         java.util.List<String> toolNames = new java.util.ArrayList<>();
         if (tracker != null) {
             var executions = tracker.getExecutions();
+            baseAssistantMessage = ensureSummaryAfterReadbinary(userMessage, baseAssistantMessage, executions);
             if (!executions.isEmpty()) {
                 for (var exec : executions) {
                     toolNames.add(exec.toolName());
@@ -179,10 +213,14 @@ public class ChatInteractor {
                 // tool 結果を LLM 応答の前に付加
                 if (!toolResults.isEmpty()) {
                     toolResultsText = toolResults.toString();
-                    assistantMessage = toolResultsText + "\n\n" + baseAssistantMessage;
                 }
             }
         }
+
+        baseAssistantMessage = guardAssistantResponse(userMessage, baseAssistantMessage);
+        assistantMessage = toolResultsText.isEmpty()
+            ? baseAssistantMessage
+            : toolResultsText + "\n\n" + baseAssistantMessage;
 
         if (!toolNames.isEmpty()) {
             ExecutionLogger.logToolExecution(toolNames);
@@ -288,22 +326,44 @@ public class ChatInteractor {
             return;
         }
 
+        AttachmentExpansionResult expansion = expandAttachmentTokens(userMessage);
+        if (!expansion.success()) {
+            String assistantMessage = "(error) " + expansion.errorMessage();
+            conversationHistory.add(new ChatMessage("user", userMessage));
+            conversationHistory.add(new ChatMessage("assistant", assistantMessage));
+            String turnText = "You: " + userMessage + "\n"
+                + "Assistant: " + assistantMessage + "\n\n";
+            transcript.append(turnText);
+            persistConversation();
+            onToken.accept(turnText);
+            ExecutionLogger.logReply(assistantMessage);
+            onComplete.run();
+            return;
+        }
+
         // LLM ストリーミング: "You: ..." ヘッダーをまず通知
         String youHeader = "You: " + userMessage + "\nAssistant: ";
         onToken.accept(youHeader);
 
         chatService.streamReplyToWithHistory(
             conversationHistory,
-            userMessage,
+            expansion.expandedMessage(),
             onToken,  // 各トークンを UI に直接通知
             fullLlmText -> {
                 // ツール実行結果プレフィックスを付加
                 String assistantMessage = fullLlmText;
                 String toolResultsText = "";
+                String finalLlmText = fullLlmText;
                 ToolExecutionTracker tracker = chatService.getToolExecutionTracker();
                 java.util.List<String> toolNames = new java.util.ArrayList<>();
                 if (tracker != null) {
                     var executions = tracker.getExecutions();
+                    finalLlmText = ensureSummaryAfterReadbinary(userMessage, finalLlmText, executions);
+                    finalLlmText = guardAssistantResponse(userMessage, finalLlmText);
+                    if (!finalLlmText.equals(fullLlmText)) {
+                        onToken.accept("\n" + finalLlmText);
+                    }
+                    assistantMessage = finalLlmText;
                     if (!executions.isEmpty()) {
                         for (var exec : executions) {
                             toolNames.add(exec.toolName());
@@ -317,7 +377,7 @@ public class ChatInteractor {
                         }
                         if (!toolResults.isEmpty()) {
                             toolResultsText = toolResults.toString();
-                            assistantMessage = toolResults.toString() + "\n\n" + fullLlmText;
+                            assistantMessage = toolResults.toString() + "\n\n" + finalLlmText;
                         }
                     }
                 }
@@ -337,14 +397,14 @@ public class ChatInteractor {
                         + "Assistant: " + TOOL_RESULTS_BEGIN_MARKER + "\n"
                         + toolResultsText + "\n"
                         + "Assistant: " + TOOL_RESULTS_END_MARKER + "\n"
-                        + "Assistant: " + fullLlmText + "\n\n";
+                        + "Assistant: " + finalLlmText + "\n\n";
                 } else {
                     turnText = "You: " + userMessage + "\n"
                         + "Assistant: " + assistantMessage + "\n\n";
                 }
                 transcript.append(turnText);
                 persistConversation();
-                ExecutionLogger.logReply(fullLlmText);
+                    ExecutionLogger.logReply(finalLlmText);
                 onComplete.run();
             },
             onError,
@@ -393,6 +453,7 @@ public class ChatInteractor {
     public void updateWorkingDirectory(java.nio.file.Path dir) {
         if (dir == null) return;
         chatService.setWorkingDirectory(dir);
+        attachmentStore = new BinaryAttachmentStore(dir);
         if (currentSession != null) {
             currentSession.setWorkingDirectory(dir.toString());
             if (conversationStore != null) {
@@ -452,9 +513,124 @@ public class ChatInteractor {
         }
 
         try {
-            chatService.setWorkingDirectory(Path.of(pathText));
+            Path dir = Path.of(pathText);
+            chatService.setWorkingDirectory(dir);
+            attachmentStore = new BinaryAttachmentStore(dir);
         } catch (InvalidPathException ignored) {
             // setdir 側で既にエラー扱いのため、ここでは何もしない
+        }
+    }
+
+    private AttachmentExpansionResult expandAttachmentTokens(String userMessage) {
+        Matcher matcher = ATTACHMENT_TOKEN_PATTERN.matcher(userMessage);
+        StringBuffer expanded = new StringBuffer();
+        boolean found = false;
+
+        while (matcher.find()) {
+            found = true;
+            String attachmentId = matcher.group(1);
+            var metaOpt = attachmentStore.getMeta(attachmentId);
+            var base64Opt = attachmentStore.getBase64(attachmentId);
+            if (metaOpt.isEmpty() || base64Opt.isEmpty()) {
+                return AttachmentExpansionResult.error("attachmentId が無効です: " + attachmentId);
+            }
+
+            BinaryAttachmentStore.AttachmentMetadata meta = metaOpt.get();
+            String replacement = "attachment(id=" + attachmentId
+                    + ",name=\"" + meta.filename()
+                    + "\",mime=\"" + meta.mimeType()
+                    + "\",base64=\"" + base64Opt.get() + "\")";
+            matcher.appendReplacement(expanded, Matcher.quoteReplacement(replacement));
+        }
+
+        if (!found) {
+            return AttachmentExpansionResult.success(userMessage);
+        }
+        matcher.appendTail(expanded);
+        return AttachmentExpansionResult.success(expanded.toString());
+    }
+
+    private String guardAssistantResponse(String userMessage, String assistantMessage) {
+        if (assistantMessage == null || assistantMessage.isBlank()) {
+            return assistantMessage;
+        }
+        if (!ASSISTANT_ATTACHMENT_TOKEN_PATTERN.matcher(assistantMessage).find()) {
+            return assistantMessage;
+        }
+
+        String retryInstruction = "\n\n重要: 回答には [[ATTACH:...]] のようなトークンを含めず、"
+            + "最終的な要約や説明本文だけを日本語で返してください。";
+        String retried = chatService.replyToWithHistory(conversationHistory, userMessage + retryInstruction);
+        if (retried == null || retried.isBlank()) {
+            return "(error) 要約結果の生成に失敗しました。もう一度お試しください。";
+        }
+        if (ASSISTANT_ATTACHMENT_TOKEN_PATTERN.matcher(retried).find()) {
+            return "(error) 要約結果の生成に失敗しました。もう一度お試しください。";
+        }
+        return retried;
+    }
+
+    private String ensureSummaryAfterReadbinary(
+            String userMessage,
+            String assistantMessage,
+            List<ToolExecutionTracker.ToolExecution> executions) {
+        if (assistantMessage == null || assistantMessage.isBlank()) {
+            return assistantMessage;
+        }
+        if (!isLikelySummaryRequest(userMessage)) {
+            return assistantMessage;
+        }
+        boolean hasReadbinary = executions != null
+            && executions.stream().anyMatch(exec -> "readbinary".equals(exec.toolName()));
+        if (!hasReadbinary) {
+            return assistantMessage;
+        }
+        if (!looksLikeToolPayloadOnly(assistantMessage)) {
+            return assistantMessage;
+        }
+
+        String readbinaryResults = executions.stream()
+            .filter(exec -> "readbinary".equals(exec.toolName()))
+            .map(ToolExecutionTracker.ToolExecution::result)
+            .collect(Collectors.joining("\n\n"));
+
+        String retryPrompt = "次の readbinary 結果を使って、ユーザー要求に対する最終回答を日本語で作成してください。"
+            + "\n制約: base64 文字列や tool の生出力はそのまま表示しない。要点を簡潔にまとめる。"
+            + "\n\nユーザー要求:\n" + userMessage
+            + "\n\nreadbinary結果:\n" + readbinaryResults;
+
+        String retried = chatService.replyToWithHistory(conversationHistory, retryPrompt);
+        if (retried == null || retried.isBlank()) {
+            return assistantMessage;
+        }
+        return retried;
+    }
+
+    private static boolean isLikelySummaryRequest(String userMessage) {
+        if (userMessage == null) {
+            return false;
+        }
+        return userMessage.contains("要約")
+            || userMessage.contains("まとめ")
+            || userMessage.contains("説明");
+    }
+
+    private static boolean looksLikeToolPayloadOnly(String assistantMessage) {
+        String text = assistantMessage.trim();
+        return text.startsWith("(tool:readbinary)")
+            || text.contains("base64=")
+            || text.contains("attachmentId=")
+            || text.startsWith("file=")
+            || ASSISTANT_ATTACHMENT_TOKEN_PATTERN.matcher(text).find();
+    }
+
+    private record AttachmentExpansionResult(boolean success, String expandedMessage, String errorMessage) {
+        static AttachmentExpansionResult success(String message) {
+            return new AttachmentExpansionResult(true, message, "");
+        }
+
+        static AttachmentExpansionResult error(String message) {
+            return new AttachmentExpansionResult(false, "", message);
         }
     }
 
