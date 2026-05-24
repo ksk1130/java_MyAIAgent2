@@ -117,32 +117,9 @@ public class App extends Application {
         });
 
         Button deleteChatButton = new Button("削除");
+        // 共通削除処理を呼び出す
         deleteChatButton.setOnAction(event -> {
-            SessionSummary selected = sessionList.getSelectionModel().getSelectedItem();
-            if (selected == null) {
-                return;
-            }
-
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-            confirm.setTitle("履歴の削除");
-            confirm.setHeaderText("この会話履歴を削除しますか？");
-            confirm.setContentText(selected.title());
-
-            if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-                return;
-            }
-
-            conversationStore.deleteSession(selected.sessionId());
-
-            java.util.List<SessionSummary> remainings = conversationStore.listSessions();
-            if (remainings.isEmpty()) {
-                ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
-            } else {
-                SessionSummary next = remainings.get(0);
-                switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
-            }
-            refreshSessionsRef[0].run();
+            deleteSessionAndSwitch(sessionList.getSelectionModel().getSelectedItem(), chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir);
         });
         deleteChatButton.disableProperty().bind(sessionList.getSelectionModel().selectedItemProperty().isNull());
 
@@ -170,29 +147,7 @@ public class App extends Application {
 
             javafx.scene.control.MenuItem deleteItem = new javafx.scene.control.MenuItem("削除");
             deleteItem.setOnAction(ev -> {
-                SessionSummary item = cell.getItem();
-                if (item == null) return;
-
-                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
-                confirm.setTitle("履歴の削除");
-                confirm.setHeaderText("この会話履歴を削除しますか？");
-                confirm.setContentText(item.title());
-
-                if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
-                    return;
-                }
-
-                conversationStore.deleteSession(item.sessionId());
-
-                java.util.List<SessionSummary> remainings = conversationStore.listSessions();
-                if (remainings.isEmpty()) {
-                    ConversationSession created = conversationStore.createNewSession(workDir.toString());
-                    switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
-                } else {
-                    SessionSummary next = remainings.get(0);
-                    switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, next.sessionId());
-                }
-                refreshSessionsRef[0].run();
+                deleteSessionAndSwitch(cell.getItem(), chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir);
             });
 
             javafx.scene.control.ContextMenu menu = new javafx.scene.control.ContextMenu(deleteItem);
@@ -428,6 +383,50 @@ public class App extends Application {
         interactorRef.set(selectedInteractor);
         updateWebPreview(webEngine, selectedInteractor.getTranscript());
         baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+
+        if (refreshSessions != null) {
+            try {
+                refreshSessions.run();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /**
+     * セッションを削除し、次に選択すべきセッションへ切り替える共通ロジック。
+     * 削除確認ダイアログを表示してユーザーが承認した場合のみ実行する。
+     */
+    private void deleteSessionAndSwitch(
+        SessionSummary selected,
+        ChatService chatService,
+        ConversationStore conversationStore,
+        AtomicReference<ChatInteractor> interactorRef,
+        WebEngine webEngine,
+        Runnable refreshSessions,
+        Label baseDirLabel,
+        Path workDir) {
+
+        if (selected == null) return;
+
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+        confirm.setTitle("履歴の削除");
+        confirm.setHeaderText("この会話履歴を削除しますか？");
+        confirm.setContentText(selected.title());
+
+        if (confirm.showAndWait().orElse(ButtonType.CANCEL) != ButtonType.OK) {
+            return;
+        }
+
+        conversationStore.deleteSession(selected.sessionId());
+
+        java.util.List<SessionSummary> remainings = conversationStore.listSessions();
+        if (remainings.isEmpty()) {
+            ConversationSession created = conversationStore.createNewSession(workDir.toString());
+            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessions, baseDirLabel, created.sessionId());
+        } else {
+            SessionSummary next = remainings.get(0);
+            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId());
+        }
 
         if (refreshSessions != null) {
             try {
