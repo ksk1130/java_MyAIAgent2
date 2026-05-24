@@ -256,6 +256,7 @@ public class OpenAiCompatibleChatService implements ChatService {
         streamingAssistant.chat(userMessage)
             .onPartialResponse(token -> {
                 accumulated.append(token);
+                // キャンセルチェックはオーバーロード版で対応
                 onToken.accept(token);
             })
             .onRetrieved(ignored -> {})
@@ -290,6 +291,81 @@ public class OpenAiCompatibleChatService implements ChatService {
                 onComplete.accept(accumulated.toString());
             })
             .onError(err -> {
+                try {
+                    accumulated.setLength(0);
+                    String result = assistant.chat(userMessage);
+                    onToken.accept(result);
+                    onComplete.accept(result);
+                } catch (Exception fallbackErr) {
+                    onError.accept(fallbackErr);
+                }
+            })
+            .start();
+    }
+
+    /**
+     * キャンセル判定を受け取るオーバーロード版。
+     */
+    public void streamReplyToWithHistory(
+            List<ChatMessage> history,
+            String userMessage,
+            Consumer<String> onToken,
+            Consumer<String> onComplete,
+            Consumer<Throwable> onError,
+            Consumer<String> onProgress,
+            java.util.function.BooleanSupplier isCancelled) {
+        restoreMemory(history);
+        toolExecutionTracker.clear();
+        StringBuilder accumulated = new StringBuilder();
+        final int[] reportedToolCount = new int[] {0};
+        streamingAssistant.chat(userMessage)
+            .onPartialResponse(token -> {
+                if (isCancelled.getAsBoolean()) return;
+                accumulated.append(token);
+                onToken.accept(token);
+            })
+            .onRetrieved(ignored -> {})
+            .onToolExecuted(ignored -> {
+                if (isCancelled.getAsBoolean()) return;
+                if (onProgress == null) {
+                    return;
+                }
+                var executions = toolExecutionTracker.getExecutions();
+                if (executions.size() <= reportedToolCount[0]) {
+                    return;
+                }
+                for (int i = reportedToolCount[0]; i < executions.size(); i++) {
+                    String toolName = executions.get(i).toolName();
+                    if (toolName != null && !toolName.isBlank()) {
+                        onProgress.accept(toolName + "実行中...");
+                    }
+                }
+                reportedToolCount[0] = executions.size();
+            })
+            .onCompleteResponse(ignored -> {
+                if (isCancelled.getAsBoolean()) {
+                    // キャンセル時でも完了通知を送って呼び出し元の後片付けを行わせる
+                    onComplete.accept("");
+                    return;
+                }
+                if (accumulated.isEmpty()) {
+                    try {
+                        String result = assistant.chat(userMessage);
+                        onToken.accept(result);
+                        onComplete.accept(result);
+                    } catch (Exception fallbackErr) {
+                        onError.accept(fallbackErr);
+                    }
+                    return;
+                }
+                onComplete.accept(accumulated.toString());
+            })
+            .onError(err -> {
+                if (isCancelled.getAsBoolean()) {
+                    // キャンセル時は通常エラー扱いせず完了通知で片付ける
+                    onComplete.accept("");
+                    return;
+                }
                 try {
                     accumulated.setLength(0);
                     String result = assistant.chat(userMessage);

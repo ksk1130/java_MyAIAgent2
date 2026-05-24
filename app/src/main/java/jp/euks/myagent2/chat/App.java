@@ -186,6 +186,16 @@ public class App extends Application {
         });
 
         Button sendButton = new Button("送信");
+        Button cancelButton = new Button("キャンセル");
+        cancelButton.setDisable(true);
+        cancelButton.setOnAction(ev -> {
+            ChatInteractor active = interactorRef.get();
+            if (active != null) {
+                active.cancelCurrentRequest();
+                progressLabel.setText("[進捗] キャンセル要求を送信しました");
+            }
+            cancelButton.setDisable(true);
+        });
         Runnable sendAction = () -> {
             String userInput = inputField.getText().trim();
             if (userInput.isEmpty()) {
@@ -197,6 +207,7 @@ public class App extends Application {
             inputField.clear();
             inputField.setDisable(true);
             sendButton.setDisable(true);
+            cancelButton.setDisable(false);
             sendButton.setText("応答中...");
             progressLabel.setVisible(true);
             progressLabel.setManaged(true);
@@ -218,6 +229,7 @@ public class App extends Application {
                         progressLabel.setVisible(false);
                         progressLabel.setManaged(false);
                         progressLabel.setText("");
+                        cancelButton.setDisable(true);
                         if (interactorRef.get() == activeInteractor) {
                             updateWebPreview(webEngine, activeInteractor.getTranscript());
                         } else {
@@ -228,6 +240,7 @@ public class App extends Application {
                         baseDirLabel.setText("作業ディレクトリ: " + activeInteractor.getWorkingDirectory().toString());
                         inputField.setDisable(false);
                         sendButton.setDisable(false);
+                        cancelButton.setDisable(true);
                         sendButton.setText("送信");
                         newChatButton.setDisable(false);
                         // bindを再設定して通常動作に戻す
@@ -246,6 +259,7 @@ public class App extends Application {
                         alert.showAndWait();
                         inputField.setDisable(false);
                         sendButton.setDisable(false);
+                        cancelButton.setDisable(true);
                         sendButton.setText("送信");
                         newChatButton.setDisable(false);
                         deleteChatButton.disableProperty().bind(
@@ -265,7 +279,7 @@ public class App extends Application {
             }
         });
 
-        HBox inputRow = new HBox(8, inputField, sendButton);
+        HBox inputRow = new HBox(8, inputField, sendButton, cancelButton);
         VBox bottomBox = new VBox(4, progressLabel, inputRow);
         BorderPane chatPane = new BorderPane();
         chatPane.setCenter(webView);

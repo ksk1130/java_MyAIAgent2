@@ -63,6 +63,22 @@ public interface ChatService {
     }
 
     /**
+     * ストリーミング版の拡張: キャンセル判定を受け取るオーバーロード。
+     * 実装はこの判定を適宜参照して通知を止めることができる。
+     */
+    default void streamReplyToWithHistory(
+            List<ChatMessage> history,
+            String userMessage,
+            Consumer<String> onToken,
+            Consumer<String> onComplete,
+            Consumer<Throwable> onError,
+            Consumer<String> onProgress,
+            java.util.function.BooleanSupplier isCancelled) {
+        // デフォルトはキャンセルを無視して既存実装へフォールバック
+        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, onProgress);
+    }
+
+    /**
      * 従来のstreamReplyToWithHistory（onProgressなし）
      */
     default void streamReplyToWithHistory(

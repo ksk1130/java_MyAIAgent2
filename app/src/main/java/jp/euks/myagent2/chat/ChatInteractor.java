@@ -9,6 +9,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -31,6 +33,9 @@ public class ChatInteractor {
     private final ConversationSession currentSession;
     private BinaryAttachmentStore attachmentStore;
     private volatile boolean busy = false;
+    private final AtomicLong requestCounter = new AtomicLong(0L);
+    private volatile long activeRequestId = 0L;
+    private volatile boolean cancelled = false;
 
     /**
      * 単純なコンストラクタ。既定の ManualToolExecutor を使用する。
@@ -346,6 +351,11 @@ public class ChatInteractor {
         String youHeader = "You: " + userMessage + "\nAssistant: ";
         onToken.accept(youHeader);
 
+        // リクエスト ID を発行してキャンセル状態を管理
+        long requestId = requestCounter.incrementAndGet();
+        activeRequestId = requestId;
+        cancelled = false;
+
         // マーク: ストリーミング中フラグを立て、完了時/エラー時にクリアする
         busy = true;
         Runnable wrappedOnComplete = () -> {
@@ -357,72 +367,86 @@ public class ChatInteractor {
             onError.accept(err);
         };
 
+        BooleanSupplier isCancelledSupplier = () -> (activeRequestId != requestId) || cancelled;
+
         try {
             chatService.streamReplyToWithHistory(
                 conversationHistory,
                 expansion.expandedMessage(),
-                onToken,  // 各トークンを UI に直接通知
+                token -> {
+                    if (isCancelledSupplier.getAsBoolean()) return;
+                    onToken.accept(token);
+                },  // 各トークンを UI に直接通知
                 fullLlmText -> {
-                // ツール実行結果プレフィックスを付加
-                String assistantMessage = fullLlmText;
-                String toolResultsText = "";
-                String finalLlmText = fullLlmText;
-                ToolExecutionTracker tracker = chatService.getToolExecutionTracker();
-                java.util.List<String> toolNames = new java.util.ArrayList<>();
-                if (tracker != null) {
-                    var executions = tracker.getExecutions();
-                    finalLlmText = ensureSummaryAfterReadbinary(userMessage, finalLlmText, executions);
-                    finalLlmText = guardAssistantResponse(userMessage, finalLlmText);
-                    if (!finalLlmText.equals(fullLlmText)) {
-                        onToken.accept("\n" + finalLlmText);
+                    if (isCancelledSupplier.getAsBoolean()) {
+                        // キャンセル時は追加の履歴化を行わず、完了処理のみ行う
+                        wrappedOnComplete.run();
+                        return;
                     }
-                    assistantMessage = finalLlmText;
-                    if (!executions.isEmpty()) {
-                        for (var exec : executions) {
-                            toolNames.add(exec.toolName());
+                    // ツール実行結果プレフィックスを付加
+                    String assistantMessage = fullLlmText;
+                    String toolResultsText = "";
+                    String finalLlmText = fullLlmText;
+                    ToolExecutionTracker tracker = chatService.getToolExecutionTracker();
+                    java.util.List<String> toolNames = new java.util.ArrayList<>();
+                    if (tracker != null) {
+                        var executions = tracker.getExecutions();
+                        finalLlmText = ensureSummaryAfterReadbinary(userMessage, finalLlmText, executions);
+                        finalLlmText = guardAssistantResponse(userMessage, finalLlmText);
+                        if (!finalLlmText.equals(fullLlmText)) {
+                            onToken.accept("\n" + finalLlmText);
                         }
-                        StringBuilder toolResults = new StringBuilder();
-                        for (var exec : executions) {
-                            if (!toolResults.isEmpty()) {
-                                toolResults.append("\n\n");
+                        assistantMessage = finalLlmText;
+                        if (!executions.isEmpty()) {
+                            for (var exec : executions) {
+                                toolNames.add(exec.toolName());
                             }
-                            toolResults.append(exec.format());
-                        }
-                        if (!toolResults.isEmpty()) {
-                            toolResultsText = toolResults.toString();
-                            assistantMessage = toolResults.toString() + "\n\n" + finalLlmText;
+                            StringBuilder toolResults = new StringBuilder();
+                            for (var exec : executions) {
+                                if (!toolResults.isEmpty()) {
+                                    toolResults.append("\n\n");
+                                }
+                                toolResults.append(exec.format());
+                            }
+                            if (!toolResults.isEmpty()) {
+                                toolResultsText = toolResults.toString();
+                                assistantMessage = toolResults.toString() + "\n\n" + finalLlmText;
+                            }
                         }
                     }
-                }
 
-                if (!toolNames.isEmpty()) {
-                    ExecutionLogger.logToolExecution(toolNames);
-                }
+                    if (!toolNames.isEmpty()) {
+                        ExecutionLogger.logToolExecution(toolNames);
+                    }
 
-                syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
-                conversationHistory.add(new ChatMessage("user", userMessage));
-                conversationHistory.add(new ChatMessage("assistant", assistantMessage));
+                    syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
+                    conversationHistory.add(new ChatMessage("user", userMessage));
+                    conversationHistory.add(new ChatMessage("assistant", assistantMessage));
 
-                // transcript はストリーミング中は更新せず、完了時に全ターンテキストを追加
-                String turnText;
-                if (!toolResultsText.isEmpty()) {
-                    turnText = "You: " + userMessage + "\n"
-                        + "Assistant: " + TOOL_RESULTS_BEGIN_MARKER + "\n"
-                        + toolResultsText + "\n"
-                        + "Assistant: " + TOOL_RESULTS_END_MARKER + "\n"
-                        + "Assistant: " + finalLlmText + "\n\n";
-                } else {
-                    turnText = "You: " + userMessage + "\n"
-                        + "Assistant: " + assistantMessage + "\n\n";
-                }
-                transcript.append(turnText);
-                persistConversation();
+                    // transcript はストリーミング中は更新せず、完了時に全ターンテキストを追加
+                    String turnText;
+                    if (!toolResultsText.isEmpty()) {
+                        turnText = "You: " + userMessage + "\n"
+                            + "Assistant: " + TOOL_RESULTS_BEGIN_MARKER + "\n"
+                            + toolResultsText + "\n"
+                            + "Assistant: " + TOOL_RESULTS_END_MARKER + "\n"
+                            + "Assistant: " + finalLlmText + "\n\n";
+                    } else {
+                        turnText = "You: " + userMessage + "\n"
+                            + "Assistant: " + assistantMessage + "\n\n";
+                    }
+                    transcript.append(turnText);
+                    persistConversation();
                     ExecutionLogger.logReply(finalLlmText);
-                wrappedOnComplete.run();
-            },
-            wrappedOnError,
-            onProgress
-        );
+                    wrappedOnComplete.run();
+                },
+                wrappedOnError,
+                progressText -> {
+                    if (isCancelledSupplier.getAsBoolean()) return;
+                    if (onProgress != null) onProgress.accept(progressText);
+                },
+                isCancelledSupplier
+            );
         } catch (Exception e) {
             busy = false;
             onError.accept(e);
@@ -513,6 +537,15 @@ public class ChatInteractor {
      */
     public void save() {
         persistConversation();
+    }
+
+    /**
+     * 現在の進行中リクエストをキャンセルする。UI側のキャンセル操作から呼ぶ想定。
+     */
+    public void cancelCurrentRequest() {
+        // 単純化: フラグを立てるだけでストリーム実行側がチェックして停止する
+        this.cancelled = true;
+        this.activeRequestId = 0L;
     }
 
     private void persistConversation() {
