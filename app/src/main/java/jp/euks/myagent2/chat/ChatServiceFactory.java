@@ -67,9 +67,46 @@ public final class ChatServiceFactory {
                 model.isEmpty() ? DEFAULT_MODEL : model,
                 new WorkspaceGrepTool(workDir),
                 new GitLogTool(workDir),
-                new FileReaderTool(),
+                new FileReaderTool(workDir),
                 new FileWriterTool(workDir),
                 new LocalCommandTool(workDir));
+    }
+
+    /**
+     * 指定した作業ディレクトリを使ってセッション用の ChatService を生成する。
+     * 環境変数は実行環境の値を使用する。
+     */
+    public static ChatService createForSession(Path workDir) {
+        Map<String, String> env = System.getenv();
+        String apiKey = trimToEmpty(env.get(ENV_API_KEY));
+        if (apiKey.isEmpty()) {
+            return new StubChatService();
+        }
+
+        String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL));
+        String model = trimToEmpty(env.getOrDefault(ENV_MODEL, DEFAULT_MODEL));
+        String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
+
+        String effectiveBaseUrl = normalizedBaseUrl;
+        String effectiveApiKey = apiKey;
+
+        if (containsGoogleHost(normalizedBaseUrl)) {
+            GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl, apiKey);
+            effectiveBaseUrl = endpoint.baseUrl();
+            effectiveApiKey = endpoint.apiKey();
+        }
+
+        Path resolvedWorkDir = (workDir == null) ? Path.of(System.getProperty("user.dir")) : workDir;
+
+        return new OpenAiCompatibleChatService(
+                effectiveBaseUrl,
+                effectiveApiKey,
+                model.isEmpty() ? DEFAULT_MODEL : model,
+                new WorkspaceGrepTool(resolvedWorkDir),
+                new GitLogTool(resolvedWorkDir),
+                new FileReaderTool(resolvedWorkDir),
+                new FileWriterTool(resolvedWorkDir),
+                new LocalCommandTool(resolvedWorkDir));
     }
 
     /**

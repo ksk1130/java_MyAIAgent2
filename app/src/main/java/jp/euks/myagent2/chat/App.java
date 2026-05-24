@@ -72,18 +72,13 @@ public class App extends Application {
         Logger log = LoggerFactory.getLogger(App.class);
         Path workDir = Path.of(System.getProperty("user.dir"));
         ConversationStore conversationStore = new JsonConversationStore(workDir);
-        ChatService chatService = ChatServiceFactory.createDefault();
-        // 初期作業ディレクトリを設定して UI に表示できるようにしておく
-        chatService.setWorkingDirectory(workDir);
+        // SessionRuntimeManager を作成してセッション単位のインスタンス化を管理
+        SessionRuntimeManager runtimeManager = new SessionRuntimeManager(5, conversationStore, workDir);
 
-        // 起動時は必ず新規セッションから開始する（初期ディレクトリをセッションに保存）
+        // 起動時は新規セッションから開始（既存ロジックを維持）
         ConversationSession initial = conversationStore.createNewSession(workDir.toString());
-        ChatInteractor initialInteractor = new ChatInteractor(
-            chatService,
-            new DefaultManualToolExecutor(),
-            conversationStore,
-            initial.sessionId());
-        AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(initialInteractor);
+        SessionRuntime initialRuntime = runtimeManager.getOrCreate(initial.sessionId());
+        AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(initialRuntime.getInteractor());
 
         WebView webView = new WebView();
         WebEngine webEngine = webView.getEngine();
@@ -113,13 +108,13 @@ public class App extends Application {
         Button newChatButton = new Button("+ 新規");
         newChatButton.setOnAction(event -> {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
+            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, created.sessionId());
         });
 
         Button deleteChatButton = new Button("削除");
         // 共通削除処理を呼び出す
         deleteChatButton.setOnAction(event -> {
-            deleteSessionAndSwitch(sessionList.getSelectionModel().getSelectedItem(), chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir);
+                deleteSessionAndSwitch(sessionList.getSelectionModel().getSelectedItem(), conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager);
         });
         deleteChatButton.disableProperty().bind(sessionList.getSelectionModel().selectedItemProperty().isNull());
 
@@ -130,7 +125,7 @@ public class App extends Application {
             if (newValue.sessionId().equals(interactorRef.get().getCurrentSessionId())) {
                 return;
             }
-            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
+            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, newValue.sessionId());
         });
 
         refreshSessionsRef[0].run();
@@ -147,7 +142,7 @@ public class App extends Application {
 
             javafx.scene.control.MenuItem deleteItem = new javafx.scene.control.MenuItem("削除");
             deleteItem.setOnAction(ev -> {
-                deleteSessionAndSwitch(cell.getItem(), chatService, conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir);
+                deleteSessionAndSwitch(cell.getItem(), conversationStore, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager);
             });
 
             javafx.scene.control.ContextMenu menu = new javafx.scene.control.ContextMenu(deleteItem);
@@ -359,8 +354,7 @@ public class App extends Application {
     }
 
     private void switchToSession(
-        ChatService chatService,
-        ConversationStore conversationStore,
+        SessionRuntimeManager runtimeManager,
         AtomicReference<ChatInteractor> interactorRef,
         WebEngine webEngine,
         Runnable refreshSessions,
@@ -371,18 +365,13 @@ public class App extends Application {
             return;
         }
 
-        // LLM 側のメモリをクリアしてから新しいセッションを読み込む
-        chatService.clearMemory();
+        SessionRuntime rt = runtimeManager.getOrCreate(sessionId);
+        if (rt == null) return;
 
-        ChatInteractor selectedInteractor = new ChatInteractor(
-            chatService,
-            new DefaultManualToolExecutor(),
-            conversationStore,
-            sessionId);
-
+        ChatInteractor selectedInteractor = rt.getInteractor();
         interactorRef.set(selectedInteractor);
         updateWebPreview(webEngine, selectedInteractor.getTranscript());
-        baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+        baseDirLabel.setText("作業ディレクトリ: " + selectedInteractor.getWorkingDirectory().toString());
 
         if (refreshSessions != null) {
             try {
@@ -398,13 +387,13 @@ public class App extends Application {
      */
     private void deleteSessionAndSwitch(
         SessionSummary selected,
-        ChatService chatService,
         ConversationStore conversationStore,
         AtomicReference<ChatInteractor> interactorRef,
         WebEngine webEngine,
         Runnable refreshSessions,
         Label baseDirLabel,
-        Path workDir) {
+        Path workDir,
+        SessionRuntimeManager runtimeManager) {
 
         if (selected == null) return;
 
@@ -422,10 +411,10 @@ public class App extends Application {
         java.util.List<SessionSummary> remainings = conversationStore.listSessions();
         if (remainings.isEmpty()) {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessions, baseDirLabel, created.sessionId());
+            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, created.sessionId());
         } else {
             SessionSummary next = remainings.get(0);
-            switchToSession(chatService, conversationStore, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId());
+            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId());
         }
 
         if (refreshSessions != null) {

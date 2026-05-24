@@ -30,6 +30,7 @@ public class ChatInteractor {
     private final List<ChatMessage> conversationHistory;
     private final ConversationSession currentSession;
     private BinaryAttachmentStore attachmentStore;
+    private volatile boolean busy = false;
 
     /**
      * 単純なコンストラクタ。既定の ManualToolExecutor を使用する。
@@ -345,11 +346,23 @@ public class ChatInteractor {
         String youHeader = "You: " + userMessage + "\nAssistant: ";
         onToken.accept(youHeader);
 
-        chatService.streamReplyToWithHistory(
-            conversationHistory,
-            expansion.expandedMessage(),
-            onToken,  // 各トークンを UI に直接通知
-            fullLlmText -> {
+        // マーク: ストリーミング中フラグを立て、完了時/エラー時にクリアする
+        busy = true;
+        Runnable wrappedOnComplete = () -> {
+            busy = false;
+            onComplete.run();
+        };
+        Consumer<Throwable> wrappedOnError = (err) -> {
+            busy = false;
+            onError.accept(err);
+        };
+
+        try {
+            chatService.streamReplyToWithHistory(
+                conversationHistory,
+                expansion.expandedMessage(),
+                onToken,  // 各トークンを UI に直接通知
+                fullLlmText -> {
                 // ツール実行結果プレフィックスを付加
                 String assistantMessage = fullLlmText;
                 String toolResultsText = "";
@@ -405,11 +418,15 @@ public class ChatInteractor {
                 transcript.append(turnText);
                 persistConversation();
                     ExecutionLogger.logReply(finalLlmText);
-                onComplete.run();
+                wrappedOnComplete.run();
             },
-            onError,
+            wrappedOnError,
             onProgress
         );
+        } catch (Exception e) {
+            busy = false;
+            onError.accept(e);
+        }
     }
 
     /**
@@ -482,6 +499,20 @@ public class ChatInteractor {
 
     public String getCurrentSessionId() {
         return currentSession == null ? "" : currentSession.sessionId();
+    }
+
+    /**
+     * ストリーミング中かどうかを返す（evictの判断に使用）。
+     */
+    public boolean isBusy() {
+        return busy;
+    }
+
+    /**
+     * 現在のセッション状態を永続化する公開ラッパー。
+     */
+    public void save() {
+        persistConversation();
     }
 
     private void persistConversation() {
