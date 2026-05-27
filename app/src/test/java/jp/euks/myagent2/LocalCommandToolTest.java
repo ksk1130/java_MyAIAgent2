@@ -30,7 +30,7 @@ public class LocalCommandToolTest {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         String result = tool.execute("git log; grep hello");
         
-        assertTrue(result, result.contains("危険な記号"));
+        assertTrue(result, result.contains("危険な記号が含まれています"));
     }
 
     @Test
@@ -39,7 +39,7 @@ public class LocalCommandToolTest {
         
         // テスト1: パイプ（安全な内部パイプとして許可）
         String piped = tool.execute("git log --name-only | head -n 1");
-        assertFalse(piped, piped.contains("危険な記号"));
+        assertFalse(piped, piped.contains("危険な記号が含まれています"));
         
         // テスト2: リダイレクト
         assertFalse(tool.execute("git log > output.txt").contains("(tool:cmd)"));
@@ -277,6 +277,53 @@ public class LocalCommandToolTest {
             cleanupDirectory(baseDir2);
             cleanupDirectory(fixedAddonsDir);
         }
+    }
+
+    @Test
+    public void testDoubleQuoteInArgumentIsAllowed() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("find . -name \"*Test*\"");
+        // ダブルクオートは許可されるようになったので、危険文字エラーにはならない
+        assertFalse(result, result.contains("危険な記号が含まれています"));
+    }
+
+    @Test
+    public void testDoubleQuotePreservesSpacesInArgument() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("echo \"foo bar\"");
+        // "foo bar" が 1 引数として処理される（実行結果は環境依存だが、エラーにはならない）
+        assertFalse(result.contains("危険な記号が含まれています"));
+    }
+
+    @Test
+    public void testUnclosedDoubleQuoteIsRejected() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("cat \"unclosed.txt");
+        assertTrue(result.contains("(error)"));
+    }
+
+    @Test
+    public void testDoubleQuotedSensitiveFileIsStillBlocked() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("cat \".env\"");
+        // ダブルクオート付きでも機密ファイル判定は有効
+        assertTrue(result.contains("機密ファイル"));
+    }
+
+    @Test
+    public void testDoubleQuotedPathTraversalIsStillBlocked() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("cat \"../secret.txt\"");
+        // ダブルクオート付きでもパストラバーサル判定は有効
+        assertTrue(result.contains("パストラバーサル"));
+    }
+
+    @Test
+    public void testDoubleQuoteWithEmptyStringArgument() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("echo \"\"");
+        // 空文字列引数も許可される
+        assertFalse(result.contains("危険な記号が含まれています"));
     }
 
     private static void cleanupDirectory(Path dir) throws Exception {

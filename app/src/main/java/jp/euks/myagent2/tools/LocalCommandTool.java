@@ -60,8 +60,8 @@ public class LocalCommandTool {
             "log", "show", "branch", "status", "rev-parse", "diff",
             "remote", "tag", "config", "ls-files", "describe", "reflog"));
 
-    /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い、シングルクオートは許可）。 */
-    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\"]");
+    /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い、シングルクオート・ダブルクオートは許可）。 */
+    private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\\]");
 
     /** find コマンドで禁止するオプション（コマンド実行・ファイル削除系）。 */
     private static final Set<String> FIND_FORBIDDEN_OPTIONS = new HashSet<>(Arrays.asList(
@@ -308,7 +308,7 @@ public class LocalCommandTool {
 
         String trimmed = command.trim();
         if (hasDangerousChars(trimmed)) {
-            return "(error) 危険な記号が含まれています: & ; < > ( ) $ ` \\ \"";
+            return "(error) 危険な記号が含まれています: & ; < > ( ) $ ` \\";
         }
 
         String[] stages = trimmed.split("\\|");
@@ -319,10 +319,15 @@ public class LocalCommandTool {
                 return "(error) パイプの前後にコマンドが必要です";
             }
 
-            String[] parts = stageTrimmed.split("\\s+");
-            if (parts.length == 0) {
+            List<String> partsList = tokenize(stageTrimmed);
+            if (partsList == null) {
+                return "(error) 引用符が閉じられていません";
+            }
+            if (partsList.isEmpty()) {
                 return "(error) コマンドが指定されていません";
             }
+
+            String[] parts = partsList.toArray(new String[0]);
 
             String validationError = validateParts(parts);
             if (validationError != null) {
@@ -362,6 +367,44 @@ public class LocalCommandTool {
      */
     private boolean hasDangerousChars(String input) {
         return DANGEROUS_CHARS.matcher(input).find();
+    }
+
+    /**
+     * コマンド文字列をトークンに分割する。
+     * スペースで区切るが、ダブルクオートで囲まれた部分は 1 トークンとして扱う。
+     * ダブルクオート自体は除去される。
+     * 未閉じのダブルクオートが検出された場合は null を返す。
+     * 正常な場合は List<String> を返す。
+     *
+     * @param input トークン化するコマンド文字列
+     * @return トークンリスト、または未閉じ引用符の場合は null
+     */
+    private List<String> tokenize(String input) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder currentToken = new StringBuilder();
+        boolean inQuotes = false;
+        int i = 0;
+        while (i < input.length()) {
+            char c = input.charAt(i);
+            if (c == '"') {
+                inQuotes = !inQuotes;
+            } else if (c == ' ' && !inQuotes) {
+                if (currentToken.length() > 0) {
+                    tokens.add(currentToken.toString());
+                    currentToken = new StringBuilder();
+                }
+            } else {
+                currentToken.append(c);
+            }
+            i++;
+        }
+        if (inQuotes) {
+            return null;  // 未閉じ引用符
+        }
+        if (currentToken.length() > 0) {
+            tokens.add(currentToken.toString());
+        }
+        return tokens;
     }
 
     /**
