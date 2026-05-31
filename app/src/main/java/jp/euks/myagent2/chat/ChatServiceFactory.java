@@ -1,8 +1,8 @@
 package jp.euks.myagent2.chat;
 
+import java.util.Objects;
 import jp.euks.myagent2.proxy.*;
 import jp.euks.myagent2.tools.*;
-
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Map;
@@ -22,6 +22,7 @@ public final class ChatServiceFactory {
 
     private static final String DEFAULT_BASE_URL = "https://api.openai.com/v1";
     private static final String DEFAULT_MODEL = "gpt-4o-mini";
+
     private ChatServiceFactory() {
     }
 
@@ -42,6 +43,28 @@ public final class ChatServiceFactory {
      * @return ChatService 実装
      */
     static ChatService createFromEnv(Map<String, String> env) {
+        Path workDir = Path.of(System.getProperty("user.dir"));
+        return createFromEnvWithWorkDir(env, workDir);
+    }
+
+    /**
+     * 指定した作業ディレクトリを使ってセッション用の ChatService を生成する。
+     * 環境変数は実行環境の値を使用する。
+     */
+    public static ChatService createForSession(Path workDir) {
+        Path resolvedWorkDir = (Objects.isNull(workDir)) ? Path.of(System.getProperty("user.dir")) : workDir;
+
+        return createFromEnvWithWorkDir(System.getenv(), resolvedWorkDir);
+    }
+
+    /**
+     * 環境変数と作業ディレクトリを使用して ChatService を生成する内部メソッド。
+     * 
+     * @param env     環境変数のマップ
+     * @param workDir ツールがアクセスする作業ディレクトリ
+     * @return ChatService 実装
+     */
+    private static ChatService createFromEnvWithWorkDir(Map<String, String> env, Path workDir) {
         String apiKey = trimToEmpty(env.get(ENV_API_KEY));
         if (apiKey.isEmpty()) {
             return new StubChatService();
@@ -50,21 +73,13 @@ public final class ChatServiceFactory {
         String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL));
         String model = trimToEmpty(env.getOrDefault(ENV_MODEL, DEFAULT_MODEL));
         String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
-
-        Path workDir = Path.of(System.getProperty("user.dir"));
-        String effectiveBaseUrl = normalizedBaseUrl;
-        String effectiveApiKey = apiKey;
-
-        if (containsGoogleHost(normalizedBaseUrl)) {
-            GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl, apiKey);
-            effectiveBaseUrl = endpoint.baseUrl();
-            effectiveApiKey = endpoint.apiKey();
-        }
+        String resolvedModel = model.isEmpty() ? DEFAULT_MODEL : model;
+        EndpointAuth endpointAuth = resolveEndpoint(normalizedBaseUrl, apiKey);
 
         return new OpenAiCompatibleChatService(
-                effectiveBaseUrl,
-                effectiveApiKey,
-                model.isEmpty() ? DEFAULT_MODEL : model,
+                endpointAuth.baseUrl(),
+                endpointAuth.apiKey(),
+                resolvedModel,
                 new WorkspaceGrepTool(workDir),
                 new GitLogTool(workDir),
                 new FileReaderTool(workDir),
@@ -73,40 +88,19 @@ public final class ChatServiceFactory {
     }
 
     /**
-     * 指定した作業ディレクトリを使ってセッション用の ChatService を生成する。
-     * 環境変数は実行環境の値を使用する。
+     * ベースURLがGoogleを含む場合はプロキシサーバーを起動してエンドポイントを解決するユーティリティ。
+     * 
+     * @param normalizedBaseUrl 正規化されたベースURL
+     * @param apiKey            APIキー
+     * @return エンドポイント情報を含む EndpointAuth レコード
      */
-    public static ChatService createForSession(Path workDir) {
-        Map<String, String> env = System.getenv();
-        String apiKey = trimToEmpty(env.get(ENV_API_KEY));
-        if (apiKey.isEmpty()) {
-            return new StubChatService();
+    private static EndpointAuth resolveEndpoint(String normalizedBaseUrl, String apiKey) {
+        if (!containsGoogleHost(normalizedBaseUrl)) {
+            return new EndpointAuth(normalizedBaseUrl, apiKey);
         }
-
-        String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL));
-        String model = trimToEmpty(env.getOrDefault(ENV_MODEL, DEFAULT_MODEL));
-        String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
-
-        String effectiveBaseUrl = normalizedBaseUrl;
-        String effectiveApiKey = apiKey;
-
-        if (containsGoogleHost(normalizedBaseUrl)) {
-            GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl, apiKey);
-            effectiveBaseUrl = endpoint.baseUrl();
-            effectiveApiKey = endpoint.apiKey();
-        }
-
-        Path resolvedWorkDir = (workDir == null) ? Path.of(System.getProperty("user.dir")) : workDir;
-
-        return new OpenAiCompatibleChatService(
-                effectiveBaseUrl,
-                effectiveApiKey,
-                model.isEmpty() ? DEFAULT_MODEL : model,
-                new WorkspaceGrepTool(resolvedWorkDir),
-                new GitLogTool(resolvedWorkDir),
-                new FileReaderTool(resolvedWorkDir),
-                new FileWriterTool(resolvedWorkDir),
-                new LocalCommandTool(resolvedWorkDir));
+        GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl,
+                apiKey);
+        return new EndpointAuth(endpoint.baseUrl(), endpoint.apiKey());
     }
 
     /**
@@ -134,9 +128,18 @@ public final class ChatServiceFactory {
      * @return
      */
     private static String trimToEmpty(String value) {
-        if (value == null) {
+        if (Objects.isNull(value)) {
             return "";
         }
         return value.trim();
+    }
+
+    /**
+     * エンドポイントのベースURLとAPIキーを保持するレコードクラス。
+     * 
+     * @param baseUrl エンドポイントのベースURL
+     * @param apiKey  エンドポイントにアクセスするためのAPIキー
+     */
+    private record EndpointAuth(String baseUrl, String apiKey) {
     }
 }

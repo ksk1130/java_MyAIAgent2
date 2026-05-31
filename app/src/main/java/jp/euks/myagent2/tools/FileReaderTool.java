@@ -1,5 +1,8 @@
 package jp.euks.myagent2.tools;
 
+
+
+import java.util.Objects;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
@@ -11,7 +14,6 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.util.Set;
 import java.util.Locale;
-import com.google.common.base.Strings;
 
 /**
  * ファイル読み取り用のツールクラス。
@@ -47,7 +49,7 @@ public class FileReaderTool {
      * @param baseDir 相対パス解決の基点ディレクトリ（setdir に連動）
      */
     public FileReaderTool(Path baseDir) {
-        this.baseDir = baseDir == null ? null : baseDir.toAbsolutePath().normalize();
+        this.baseDir = Objects.isNull(baseDir) ? null : baseDir.toAbsolutePath().normalize();
     }
 
     /**
@@ -72,8 +74,8 @@ public class FileReaderTool {
             }
 
             String ext = getExtension(p);
-            if (Strings.isNullOrEmpty(ext) || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
-                return "ERROR: extension not allowed: " + (ext == null ? "(none)" : ext);
+            if (ext == null || ext.isEmpty() || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
+                return "ERROR: extension not allowed: " + (Objects.isNull(ext) ? "(none)" : ext);
             }
 
             byte[] bytes = Files.readAllBytes(p);
@@ -92,7 +94,7 @@ public class FileReaderTool {
             }
 
             if (content.length() > MAX_CHARS) {
-                return "WARNING: file truncated to " + MAX_CHARS + " chars.\n" + content.substring(0, MAX_CHARS);
+                return "WARNING: file truncated to %s chars.\n".formatted(MAX_CHARS) + content.substring(0, MAX_CHARS);
             }
             return content;
         } catch (Exception e) {
@@ -124,6 +126,14 @@ public class FileReaderTool {
      * @return 拡張子。存在しない場合は null
      */
     private static String getExtension(Path p) {
-        return com.google.common.io.Files.getFileExtension(p.getFileName().toString());
+        String fileName = p.getFileName().toString();
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == fileName.length() - 1) {
+            return "";
+        }
+        return fileName.substring(dotIndex + 1);
     }
 }
+
+
+

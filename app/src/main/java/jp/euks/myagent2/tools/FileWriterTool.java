@@ -1,5 +1,8 @@
 package jp.euks.myagent2.tools;
 
+
+
+import java.util.Objects;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -9,9 +12,9 @@ import java.util.Set;
 /**
  * ファイル書き込み用ツール。セキュリティ上の理由から以下の制約を設けている。
  * <ul>
- *   <li>書き込み先はコンストラクタで指定したベースディレクトリ配下のみ（パストラバーサル防止）</li>
- *   <li>許可する拡張子：txt, md, csv, json, log, yaml, yml のみ</li>
- *   <li>コンテンツの最大文字数：50,000 文字</li>
+ * <li>書き込み先はコンストラクタで指定したベースディレクトリ配下のみ（パストラバーサル防止）</li>
+ * <li>許可する拡張子：txt, md, csv, json, log, yaml, yml のみ</li>
+ * <li>コンテンツの最大文字数：50,000 文字</li>
  * </ul>
  */
 public class FileWriterTool {
@@ -43,12 +46,12 @@ public class FileWriterTool {
         if (relativePath == null || relativePath.isBlank()) {
             return "(error) パスが空です";
         }
-        if (content == null) {
+        if (Objects.isNull(content)) {
             content = "";
         }
         content = normalizeEscapedNewlines(content);
         if (content.length() > MAX_CONTENT_CHARS) {
-            return "(error) コンテンツが長すぎます（最大 " + MAX_CONTENT_CHARS + " 文字）";
+            return "(error) コンテンツが長すぎます（最大 %s 文字）".formatted(MAX_CONTENT_CHARS);
         }
 
         // 拡張子チェック
@@ -82,13 +85,20 @@ public class FileWriterTool {
         }
     }
 
-    /** ベースディレクトリを返す（テスト用）。 */
+    /**
+     * ベースディレクトリを返します（テスト用）。
+     *
+     * @return このツールが使用するベースディレクトリの Path
+     */
     Path baseDir() {
         return baseDir;
     }
 
     /**
-     * モデルが "\\n" をリテラルとして返す場合にのみ改行へ変換する。
+     * モデルがエスケープされた改行（"\\n"）を文字列で返す場合に実際の改行に変換します。
+     *
+     * @param content 変換対象の文字列
+     * @return 実際の改行を含む正規化済み文字列
      */
     private String normalizeEscapedNewlines(String content) {
         if (content.contains("\n")) {
@@ -99,3 +109,6 @@ public class FileWriterTool {
                 .replace("\\n", "\n");
     }
 }
+
+
+

@@ -1,5 +1,8 @@
 package jp.euks.myagent2.session;
 
+
+
+import java.util.Objects;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.io.IOException;
@@ -24,10 +27,21 @@ public class JsonConversationStore implements ConversationStore {
     private final Clock clock;
     private final Gson gson;
 
+    /**
+     * コンストラクタ。
+     *
+     * @param baseDir アプリケーションデータの基点ディレクトリ（ワークスペースルート等）
+     */
     public JsonConversationStore(Path baseDir) {
         this(baseDir, Clock.systemDefaultZone());
     }
 
+    /**
+     * テスト用コンストラクタ。
+     *
+     * @param baseDir アプリケーションデータの基点ディレクトリ
+     * @param clock   注入する Clock（テスト用）
+     */
     JsonConversationStore(Path baseDir, Clock clock) {
         this.sessionsDir = baseDir.resolve(APP_DIR).resolve(SESSIONS_DIR);
         this.clock = clock;
@@ -67,14 +81,14 @@ public class JsonConversationStore implements ConversationStore {
         ensureDirs();
 
         Optional<IndexData> indexOpt = readIndex();
-        if (indexOpt.isEmpty() || indexOpt.get().sessions == null) {
+        if (indexOpt.isEmpty() || Objects.isNull(indexOpt.get().sessions)) {
             return List.of();
         }
 
         return indexOpt.get().sessions.stream()
-            .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
-            .map(s -> new SessionSummary(s.sessionId, s.title, s.updatedAt))
-            .toList();
+                .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
+                .map(s -> new SessionSummary(s.sessionId, s.title, s.updatedAt))
+                .toList();
     }
 
     @Override
@@ -109,7 +123,7 @@ public class JsonConversationStore implements ConversationStore {
         deleteSessionFileIfExists(sessionId);
 
         IndexData index = readIndex().orElseGet(IndexData::new);
-        if (index.sessions == null) {
+        if (Objects.isNull(index.sessions)) {
             index.sessions = new ArrayList<>();
         }
 
@@ -136,18 +150,24 @@ public class JsonConversationStore implements ConversationStore {
             }
         }
 
-        if (index.sessions == null || index.sessions.isEmpty()) {
+        if (Objects.isNull(index.sessions) || index.sessions.isEmpty()) {
             return Optional.empty();
         }
 
         return index.sessions.stream()
-            .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
-            .map(summary -> readSession(summary.sessionId))
-            .filter(Optional::isPresent)
-            .map(Optional::get)
-            .findFirst();
+                .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
+                .map(summary -> readSession(summary.sessionId))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .findFirst();
     }
 
+    /**
+     * セッションファイルを読み込み ConversationSession を復元します。
+     *
+     * @param sessionId 読み込み対象のセッション ID
+     * @return セッションが存在すれば Optional に格納して返す
+     */
     private Optional<ConversationSession> readSession(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
             return Optional.empty();
@@ -165,7 +185,7 @@ public class JsonConversationStore implements ConversationStore {
 
         try {
             ConversationSession session = gson.fromJson(json, ConversationSession.class);
-            if (session == null || session.sessionId() == null || session.sessionId().isBlank()) {
+            if (Objects.isNull(session) || session.sessionId() == null || session.sessionId().isBlank()) {
                 return Optional.empty();
             }
             return Optional.of(session);
@@ -174,6 +194,11 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * セッション一覧インデックスを読み込みます。
+     *
+     * @return IndexData を Optional で返す（存在しなければ空）
+     */
     private Optional<IndexData> readIndex() {
         Path indexFile = indexPath();
         if (!Files.exists(indexFile)) {
@@ -187,10 +212,10 @@ public class JsonConversationStore implements ConversationStore {
 
         try {
             IndexData data = gson.fromJson(json, IndexData.class);
-            if (data == null) {
+            if (Objects.isNull(data)) {
                 return Optional.empty();
             }
-            if (data.sessions == null) {
+            if (Objects.isNull(data.sessions)) {
                 data.sessions = new ArrayList<>();
             }
             return Optional.of(data);
@@ -199,8 +224,14 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * インデックス内にセッション要約を追加または更新します。
+     *
+     * @param index   インデックスオブジェクト
+     * @param session 更新対象のセッション
+     */
     private void upsertSummary(IndexData index, ConversationSession session) {
-        if (index.sessions == null) {
+        if (Objects.isNull(index.sessions)) {
             index.sessions = new ArrayList<>();
         }
 
@@ -219,6 +250,9 @@ public class JsonConversationStore implements ConversationStore {
         index.sessions.add(created);
     }
 
+    /**
+     * 永続化用ディレクトリを作成します。
+     */
     private void ensureDirs() {
         try {
             Files.createDirectories(sessionsDir);
@@ -227,14 +261,31 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * インデックスファイルの Path を返します。
+     *
+     * @return index.json の Path
+     */
     private Path indexPath() {
         return sessionsDir.resolve(INDEX_FILE);
     }
 
+    /**
+     * 指定セッションのファイルパスを返します。
+     *
+     * @param sessionId セッション ID
+     * @return セッション JSON ファイルの Path
+     */
     private Path sessionPath(String sessionId) {
         return sessionsDir.resolve(sessionId + ".json");
     }
 
+    /**
+     * ファイルを UTF-8 で読み取り文字列として返します。失敗時は空文字。
+     *
+     * @param file 読み取り対象のファイルパス
+     * @return ファイル内容または空文字
+     */
     private String readText(Path file) {
         try {
             return Files.readString(file, StandardCharsets.UTF_8);
@@ -243,6 +294,12 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * テキストを UTF-8 で書き込みます。失敗時は IllegalStateException をスローします。
+     *
+     * @param file 書き込み先の Path
+     * @param text 書き込むテキスト
+     */
     private void writeText(Path file, String text) {
         try {
             Files.writeString(file, text, StandardCharsets.UTF_8);
@@ -251,6 +308,11 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * セッションファイルを削除します（存在しない場合は無視）。
+     *
+     * @param sessionId 削除対象のセッション ID
+     */
     private void deleteSessionFileIfExists(String sessionId) {
         try {
             Files.deleteIfExists(sessionPath(sessionId));
@@ -259,20 +321,26 @@ public class JsonConversationStore implements ConversationStore {
         }
     }
 
+    /**
+     * セッション一覧から最新のセッション ID を選択して返します。
+     *
+     * @param summaries セッション要約のリスト
+     * @return 最新セッション ID（存在しなければ空文字）
+     */
     private String pickLatestSessionId(List<SessionSummaryData> summaries) {
-        if (summaries == null || summaries.isEmpty()) {
+        if (Objects.isNull(summaries) || summaries.isEmpty()) {
             return "";
         }
         return summaries.stream()
-            .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
-            .map(s -> s.sessionId)
-            .filter(id -> id != null && !id.isBlank())
-            .findFirst()
-            .orElse("");
+                .sorted(Comparator.comparing((SessionSummaryData s) -> nullSafe(s.updatedAt)).reversed())
+                .map(s -> s.sessionId)
+                .filter(id -> id != null && !id.isBlank())
+                .findFirst()
+                .orElse("");
     }
 
     private static String nullSafe(String value) {
-        return value == null ? "" : value;
+        return Objects.isNull(value) ? "" : value;
     }
 
     private static final class IndexData {
@@ -286,3 +354,6 @@ public class JsonConversationStore implements ConversationStore {
         String updatedAt;
     }
 }
+
+
+

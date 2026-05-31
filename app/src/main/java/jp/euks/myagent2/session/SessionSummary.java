@@ -1,5 +1,7 @@
 package jp.euks.myagent2.session;
 
+
+
 /**
  * 履歴一覧表示用のセッション要約。
  *
@@ -10,6 +12,9 @@ package jp.euks.myagent2.session;
 public record SessionSummary(String sessionId, String title, String updatedAt) {
     @Override
     public String toString() {
-        return (title == null || title.isBlank()) ? "New Chat" : title;
+        return title == null || title.isBlank() ? "New Chat" : title;
     }
 }
+
+
+

@@ -1,5 +1,7 @@
 package jp.euks.myagent2.proxy;
+
 
+import java.util.Objects;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -76,7 +78,7 @@ public final class GeminiOpenAiProxyServer {
 
     private ProxyEndpoint endpoint() {
         int port = server.getAddress().getPort();
-        return new ProxyEndpoint("http://" + LOCAL_HOST + ":" + port + "/v1", "proxy-local");
+        return new ProxyEndpoint("http://%s:".formatted(LOCAL_HOST) + port + "/v1", "proxy-local");
     }
 
     private final class ChatCompletionsHandler implements HttpHandler {
@@ -115,14 +117,14 @@ public final class GeminiOpenAiProxyServer {
                 log.debug("[{}] Gemini response: status={}, bodyBytes={}",
                     requestId,
                     response.statusCode(),
-                    response.body() == null ? 0 : response.body().getBytes(StandardCharsets.UTF_8).length);
+                    Objects.isNull(response.body()) ? 0 : response.body().getBytes(StandardCharsets.UTF_8).length);
                 log.debug("[{}] Gemini response summary: {}",
                     requestId,
                     GeminiOpenAiJsonProxy.summarizeGeminiResponse(response.body()));
                 log.debug("[{}] Gemini response body: {}", requestId, abbreviate(response.body(), 4000));
 
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    String errorJson = "{\"error\":{\"message\":\"Gemini proxy failed: HTTP " + response.statusCode() + "\",\"details\":"
+                    String errorJson = "{\"error\":{\"message\":\"Gemini proxy failed: HTTP %s\",\"details\":".formatted(response.statusCode())
                         + quoteJson(response.body()) + "}}";
                     log.warn("[{}] Gemini non-success response converted to OpenAI error", requestId);
                     writeJson(exchange, 502, errorJson);
@@ -149,7 +151,7 @@ public final class GeminiOpenAiProxyServer {
 
     private String buildGeminiGenerateContentUrl(String model) {
         String encodedModel = URLEncoder.encode(model, StandardCharsets.UTF_8).replace("+", "%20");
-        return geminiBaseUrl + "/models/" + encodedModel + ":generateContent";
+        return geminiBaseUrl + "/models/%s:generateContent".formatted(encodedModel);
     }
 
     private static String readBody(InputStream inputStream) throws IOException {
@@ -167,7 +169,7 @@ public final class GeminiOpenAiProxyServer {
     }
 
     private static String normalizeBaseUrl(String baseUrl) {
-        if (baseUrl == null) {
+        if (Objects.isNull(baseUrl)) {
             return "";
         }
         String trimmed = baseUrl.trim();
@@ -192,7 +194,7 @@ public final class GeminiOpenAiProxyServer {
     }
 
     private static String quoteJson(String text) {
-        if (text == null) {
+        if (Objects.isNull(text)) {
             return "\"\"";
         }
         return "\"" + text
@@ -203,7 +205,7 @@ public final class GeminiOpenAiProxyServer {
     }
 
     private static String abbreviate(String text, int maxLen) {
-        if (text == null) {
+        if (Objects.isNull(text)) {
             return "";
         }
         if (maxLen <= 0 || text.length() <= maxLen) {
@@ -215,3 +217,5 @@ public final class GeminiOpenAiProxyServer {
     public record ProxyEndpoint(String baseUrl, String apiKey) {
     }
 }
+
+

@@ -1,5 +1,7 @@
 package jp.euks.myagent2.common;
+
 
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.List;
@@ -18,7 +20,7 @@ public class ExecutionLogger {
     }
 
     public static void logToolExecution(List<String> toolNames) {
-        if (toolNames == null || toolNames.isEmpty()) return;
+        if (Objects.isNull(toolNames) || toolNames.isEmpty()) return;
         String toolList = String.join(", ", toolNames);
         log.info("[TOOL] 実行: {}", toolList);
     }
@@ -29,9 +31,12 @@ public class ExecutionLogger {
     }
 
     private static String truncateRequest(String text) {
-        if (text == null || text.isEmpty()) return "(empty)";
+        if (Objects.isNull(text) || text.isEmpty()) return "(empty)";
         String singleLine = text.replaceAll("\r?\n", " ");
         if (singleLine.length() <= MAX_REQUEST_LENGTH) return singleLine;
         return singleLine.substring(0, MAX_REQUEST_LENGTH) + "...";
     }
 }
+
+
+

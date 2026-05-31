@@ -1,8 +1,10 @@
 package jp.euks.myagent2.tools;
 
+
+
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -39,56 +41,57 @@ public class LocalCommandTool {
      * ツール探索先が変化しないようにする。
      */
     private static final Path DEFAULT_ADDONS_DIR = Path
-        .of(System.getProperty("user.dir"))
-        .toAbsolutePath()
-        .normalize()
-        .resolve(ADDONS_DIR_NAME)
-        .normalize();
+            .of(System.getProperty("user.dir"))
+            .toAbsolutePath()
+            .normalize()
+            .resolve(ADDONS_DIR_NAME)
+            .normalize();
 
     /** 許可するコマンド（小文字）。 */
     private static final Set<String> ALLOWED_COMMANDS = new HashSet<>(Arrays.asList(
-        "git", "grep", "rg", "nkf",
-        "ls", "find",
-        "cat", "head", "tail",
-        "wc", "stat", "diff",
-        "sort", "uniq", "cut",
-        "tree", "basename", "dirname", "realpath"));
+            "git", "grep", "rg", "nkf",
+            "ls", "find",
+            "cat", "head", "tail",
+            "wc", "stat", "diff",
+            "sort", "uniq", "cut",
+            "tree", "basename", "dirname", "realpath"));
 
     /** git で許可するサブコマンド（読み取り専用）。 */
     private static final Set<String> ALLOWED_GIT_SUBCOMMANDS = new HashSet<>(
-        Arrays.asList(
-            "log", "show", "branch", "status", "rev-parse", "diff",
-            "remote", "tag", "config", "ls-files", "describe", "reflog"));
+            Arrays.asList(
+                    "log", "show", "branch", "status", "rev-parse", "diff",
+                    "remote", "tag", "config", "ls-files", "describe", "reflog"));
 
     /** シェルメタ文字・危険な記号のパターン（'|' は安全な内部パイプとして別扱い、シングルクオートは許可）。 */
     private static final Pattern DANGEROUS_CHARS = Pattern.compile("[&;<>()$`\\\"]");
 
     /** find コマンドで禁止するオプション（コマンド実行・ファイル削除系）。 */
     private static final Set<String> FIND_FORBIDDEN_OPTIONS = new HashSet<>(Arrays.asList(
-        "-exec", "-execdir", "-ok", "-okdir",
-        "-delete", "-fprint", "-fprintf", "-fls"));
+            "-exec", "-execdir", "-ok", "-okdir",
+            "-delete", "-fprint", "-fprintf", "-fls"));
 
     /** ファイル内容を読み取るコマンド（パス引数の安全チェック対象）。 */
     private static final Set<String> FILE_READING_COMMANDS = new HashSet<>(Arrays.asList(
-        "cat", "head", "tail", "wc", "stat", "diff", "sort", "uniq", "cut", "nkf"));
+            "cat", "head", "tail", "wc", "stat", "diff", "sort", "uniq", "cut", "nkf"));
 
     /** アクセスを禁止する機密ファイルパターン（大文字小文字無視）。 */
     private static final Pattern SENSITIVE_FILE_PATTERN = Pattern.compile(
-        "(?i)(^|[/\\\\])\\.env(rc)?$"
-        + "|(?i)\\.(key|pem|pfx|p12|jks|keystore|crt|cer|der)$"
-        + "|(?i)(password|passwd|secret|credential|private[_-]key|id_rsa|id_ed25519|id_ecdsa)");
+            "(?i)(^|[/\\\\])\\.env(rc)?$"
+                    + "|(?i)\\.(key|pem|pfx|p12|jks|keystore|crt|cer|der)$"
+                    + "|(?i)(password|passwd|secret|credential|private[_-]key|id_rsa|id_ed25519|id_ecdsa)");
 
     /**
      * Windows 向けに Git Bash が提供する Unix コマンド群の既知 bin ディレクトリ（優先順）。
      */
     private static final List<Path> GIT_BASH_BIN_CANDIDATES = List.of(
-        Path.of("C:/Program Files/Git/usr/bin"),
-        Path.of("C:/Program Files (x86)/Git/usr/bin"),
-        Path.of("C:/Git/usr/bin"));
+            Path.of("C:/Program Files/Git/usr/bin"),
+            Path.of("C:/Program Files (x86)/Git/usr/bin"),
+            Path.of("C:/Git/usr/bin"));
 
     /** 起動時に検出した Git Bash の bin ディレクトリ（未検出の場合は null）。 */
     private static final Path GIT_BASH_BIN_DIR = detectGitBashBinDir();
-    private static final Set<String> DIAGNOSTIC_LOGGED_BASE_DIRS = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+    private static final Set<String> DIAGNOSTIC_LOGGED_BASE_DIRS = java.util.Collections
+            .synchronizedSet(new java.util.HashSet<>());
 
     private final Path baseDir;
     private final Path addonsDir;
@@ -109,14 +112,14 @@ public class LocalCommandTool {
     /**
      * コンストラクタ。
      *
-     * @param baseDir コマンドの実行ディレクトリ（基点）
+     * @param baseDir   コマンドの実行ディレクトリ（基点）
      * @param addonsDir 実行ファイル探索用 addons ディレクトリ（null の場合は起動時 user.dir/addons）
      */
     public LocalCommandTool(Path baseDir, Path addonsDir) {
         this.baseDir = baseDir.toAbsolutePath().normalize();
-        Path resolvedAddonsDir = (addonsDir == null)
-            ? DEFAULT_ADDONS_DIR
-            : addonsDir.toAbsolutePath().normalize();
+        Path resolvedAddonsDir = (Objects.isNull(addonsDir))
+                ? DEFAULT_ADDONS_DIR
+                : addonsDir.toAbsolutePath().normalize();
         this.addonsDir = resolvedAddonsDir;
         ensureAddonsDirExists();
         this.resolvedExes = buildResolvedExes();
@@ -137,13 +140,13 @@ public class LocalCommandTool {
 
         StringBuilder sb = new StringBuilder();
         resolvedExes.entrySet().stream()
-            .sorted(Map.Entry.comparingByKey())
-            .forEach(entry -> {
-                if (!sb.isEmpty()) {
-                    sb.append(", ");
-                }
-                sb.append(entry.getKey()).append("=").append(entry.getValue());
-            });
+                .sorted(Map.Entry.comparingByKey())
+                .forEach(entry -> {
+                    if (!sb.isEmpty()) {
+                        sb.append(", ");
+                    }
+                    sb.append(entry.getKey()).append("=").append(entry.getValue());
+                });
         log.info("[LOCALCMD] resolved executables: {}", sb);
     }
 
@@ -162,6 +165,8 @@ public class LocalCommandTool {
      * localcmd のタイムアウト秒数を解決する。
      * 環境変数 MYAGENT2_CMD_TIMEOUT_SECONDS が有効な数値なら採用し、
      * 安全のため 1〜30 秒に丸める。
+     * 
+     * @return タイムアウト秒数（1〜30 の範囲）
      */
     private static int resolveCommandTimeoutSeconds() {
         String raw = System.getenv("MYAGENT2_CMD_TIMEOUT_SECONDS");
@@ -182,6 +187,8 @@ public class LocalCommandTool {
     /**
      * 起動時に各コマンドの実行ファイルパスを解決してマップとして返す。
      * grep/rg は PATH チェックを優先し、それ以外の Unix コマンドは Git Bash から解決する。
+     * 
+     * @return コマンド名から解決済み実行ファイルパスへのマップ
      */
     private Map<String, String> buildResolvedExes() {
         Map<String, String> exes = new HashMap<>();
@@ -202,7 +209,11 @@ public class LocalCommandTool {
     }
 
     /**
-     * addons 配下に実行ファイルがあれば優先し、なければ既定解決結果を返す。
+     * addons 配下に実行ファイルが存在すればそれを優先し、なければデフォルトパスを返します。
+     *
+     * @param command            対象のコマンド名
+     * @param defaultResolvedExe デフォルトの実行ファイルパス
+     * @return 最終的に使用する実行ファイルパス
      */
     private String resolveAddonOrDefaultExe(String command, String defaultResolvedExe) {
         Path exeCandidate = addonsDir.resolve(command + ".exe");
@@ -217,7 +228,9 @@ public class LocalCommandTool {
     }
 
     /**
-     * Git Bash の bin ディレクトリを検出する。
+     * 既知の Git Bash インストール場所から bin ディレクトリを検出します。
+     *
+     * @return 見つかった bin ディレクトリの Path、未検出なら null
      */
     private static Path detectGitBashBinDir() {
         for (Path dir : GIT_BASH_BIN_CANDIDATES) {
@@ -229,9 +242,10 @@ public class LocalCommandTool {
     }
 
     /**
-     * Unix コマンドの実行ファイルパスを返す。
-     * Git Bash の bin ディレクトリが検出済みであればその絶対パスを、
-     * 未検出の場合はコマンド名のみを返す（PATH 任せ）。
+     * Unix 系コマンドの実行パスを解決します（Git Bash の bin を優先）。
+     *
+     * @param name コマンド名
+     * @return 解決された実行ファイルパスまたはコマンド名
      */
     private static String resolveUnixExe(String name) {
         if (GIT_BASH_BIN_DIR != null) {
@@ -244,8 +258,9 @@ public class LocalCommandTool {
     }
 
     /**
-     * grep 実行ファイルのパスを解決する。
-     * PATH に grep があればそれを優先し、なければ Git Bash の既知パスを探す。
+     * grep 実行ファイルのパスを解決します。
+     *
+     * @return 解決済みの grep 実行ファイルパスまたはコマンド名
      */
     private static String resolveGrepExe() {
         // PATH に grep があればそのまま使う
@@ -268,8 +283,9 @@ public class LocalCommandTool {
     }
 
     /**
-     * rg 実行ファイルのパスを解決する。
-     * PATH に rg があればそれを優先し、なければ Git Bash の既知パスを探す。
+     * rg 実行ファイルのパスを解決します。
+     *
+     * @return 解決済みの rg 実行ファイルパスまたはコマンド名
      */
     private static String resolveRgExe() {
         // PATH に rg があればそのまま使う
@@ -292,15 +308,12 @@ public class LocalCommandTool {
     }
 
     /**
-     * ローカルコマンドを実行する。
-     * 
-     * <p>
-     * 書式: {@code git log --oneline -10} など。
-     * </p>
-     * 
-     * @param command 実行するコマンド（コマンド + 引数の空白区切り文字列）
-     * @return 実行結果（出力またはエラーメッセージ）
+     * ローカルコマンドを実行します。
+     *
+     * @param command 実行するコマンドライン文字列（パイプは内部で分割されます）
+     * @return 実行結果（標準出力／エラーを含む）またはエラーメッセージ
      */
+
     public String execute(String command) {
         if (command == null || command.isBlank()) {
             return "(error) cmd の引数が空です。例: /tool cmd git log -5";
@@ -335,7 +348,7 @@ public class LocalCommandTool {
         }
 
         String result = runPipeline(pipeline);
-        return "$ " + trimmed + "\n" + result;
+        return "$ %s\n".formatted(trimmed) + result;
     }
 
     /**
@@ -358,20 +371,26 @@ public class LocalCommandTool {
     }
 
     /**
-     * 危険文字を含んでいないか検証する。
+     * 入力文字列に危険な記号が含まれているか検査します。
+     *
+     * @param input 検査対象の文字列
+     * @return 危険な記号が見つかれば true
      */
     private boolean hasDangerousChars(String input) {
         return DANGEROUS_CHARS.matcher(input).find();
     }
 
     /**
-     * 1コマンド分の引数を安全性ルールで検証する。
+     * 単一コマンドの引数配列を検証し、不正な場合はエラーメッセージを返します。
+     *
+     * @param parts コマンドと引数の配列（parts[0] がコマンド名）
+     * @return null の場合は検証合格、それ以外はエラーメッセージ
      */
+
     private String validateParts(String[] parts) {
         String baseCommand = parts[0].toLowerCase();
         if (!ALLOWED_COMMANDS.contains(baseCommand)) {
-            return "(error) 許可されていないコマンドです: " + baseCommand
-                + "。許可: " + String.join(", ", ALLOWED_COMMANDS);
+            return "(error) 許可されていないコマンドです: %s。許可: ".formatted(baseCommand) + String.join(", ", ALLOWED_COMMANDS);
         }
 
         // git の場合、サブコマンドをチェック
@@ -381,8 +400,7 @@ public class LocalCommandTool {
             }
             String subcommand = parts[1].toLowerCase();
             if (!ALLOWED_GIT_SUBCOMMANDS.contains(subcommand)) {
-                return "(error) git の許可されていないサブコマンドです: " + subcommand
-                    + "。許可: " + String.join(", ", ALLOWED_GIT_SUBCOMMANDS);
+                return "(error) git の許可されていないサブコマンドです: %s。許可: ".formatted(subcommand) + String.join(", ", ALLOWED_GIT_SUBCOMMANDS);
             }
         }
 
@@ -390,8 +408,7 @@ public class LocalCommandTool {
         if ("find".equals(baseCommand)) {
             for (String part : parts) {
                 if (FIND_FORBIDDEN_OPTIONS.contains(part.toLowerCase())) {
-                    return "(error) find の禁止オプションです: " + part
-                        + "（コマンド実行・ファイル削除系オプションは使用不可）";
+                    return "(error) find の禁止オプションです: %s（コマンド実行・ファイル削除系オプションは使用不可）".formatted(part);
                 }
             }
             for (int i = 1; i < parts.length; i++) {
@@ -424,7 +441,10 @@ public class LocalCommandTool {
     }
 
     /**
-     * パイプラインをシェルを介さず順次実行する。
+     * パイプライン（複数コマンド）を順次実行し、結合した出力を返します。
+     *
+     * @param commands コマンドの配列リスト（各要素がコマンド＋引数配列）
+     * @return パイプラインの実行結果文字列
      */
     private String runPipeline(List<String[]> commands) {
         byte[] inputBytes = null;
@@ -433,14 +453,14 @@ public class LocalCommandTool {
         for (String[] parts : commands) {
             CommandResult result = runSingleCommand(parts, inputBytes);
             if (!result.finished) {
-                return "(error) コマンドがタイムアウトしました（" + commandTimeoutSeconds + "秒）";
+                return "(error) コマンドがタイムアウトしました（%s秒）".formatted(commandTimeoutSeconds);
             }
 
             output = result.output;
             inputBytes = output.getBytes(StandardCharsets.UTF_8);
 
             if (result.exitCode != 0) {
-                return "(tool:cmd) [終了コード: " + result.exitCode + "]\n" + output;
+                return "(tool:cmd) [終了コード: %s]\n".formatted(result.exitCode) + output;
             }
         }
 
@@ -448,7 +468,7 @@ public class LocalCommandTool {
         String[] lines = output.split("\\n");
         if (lines.length > MAX_OUTPUT_LINES) {
             output = String.join("\n", Arrays.copyOf(lines, MAX_OUTPUT_LINES))
-                + "\n... (省略: 出力行数が上限を超過)";
+                    + "\n... (省略: 出力行数が上限を超過)";
         }
 
         // 出力文字数チェック
@@ -460,7 +480,11 @@ public class LocalCommandTool {
     }
 
     /**
-     * コマンドを ProcessBuilder で実行する。
+     * 単一コマンドを実行し結果を返します。
+     *
+     * @param parts コマンドと引数の配列
+     * @param stdin 前段コマンドの出力（パイプ入力、null 可）
+     * @return コマンド実行の内部結果を示す `CommandResult`
      */
     private CommandResult runSingleCommand(String[] parts, byte[] stdin) {
         try {
@@ -485,7 +509,7 @@ public class LocalCommandTool {
 
             // 出力を読み込む
             String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
-                .stripTrailing();
+                    .stripTrailing();
             int exitCode = process.exitValue();
             return new CommandResult(true, exitCode, output);
         } catch (InterruptedException e) {
@@ -497,7 +521,9 @@ public class LocalCommandTool {
     }
 
     /**
-     * 子プロセスの PATH に addons ディレクトリを先頭追加する。
+     * 子プロセスの環境変数 `PATH` に addons ディレクトリを先頭追加します。
+     *
+     * @param env プロセス環境変数マップ
      */
     private void prependAddonsToPath(Map<String, String> env) {
         if (!Files.isDirectory(addonsDir)) {
@@ -511,7 +537,7 @@ public class LocalCommandTool {
                 break;
             }
         }
-        if (pathKey == null) {
+        if (Objects.isNull(pathKey)) {
             pathKey = "PATH";
         }
 
@@ -531,7 +557,9 @@ public class LocalCommandTool {
         env.put(pathKey, addonsPath + separator + currentPath);
     }
 
-    /** コマンド実行結果の内部表現。 */
+    /**
+     * コマンド実行結果の内部表現クラス。
+     */
     private static final class CommandResult {
         private final boolean finished;
         private final int exitCode;
@@ -540,7 +568,10 @@ public class LocalCommandTool {
         private CommandResult(boolean finished, int exitCode, String output) {
             this.finished = finished;
             this.exitCode = exitCode;
-            this.output = output == null ? "" : output;
+            this.output = Objects.isNull(output) ? "" : output;
         }
     }
 }
+
+
+

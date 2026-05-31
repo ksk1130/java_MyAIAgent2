@@ -4,7 +4,7 @@ JavaFX で構築したデスクトップ向け AI チャットエージェント
 OpenAI 互換エンドポイントに接続し、ツール呼び出し（検索・Git参照・ファイルI/O・ローカルコマンド）を安全制約付きで実行できます。  
 会話履歴の保存、システムプロンプト編集、ストリーミング表示にも対応しています。
 Office/PDF 等のバイナリ読込（`readbinary`）にも対応し、抽出可能な形式は本文テキストとして扱えます。  
-さらに WebView タブで会話のHTMLプレビュー表示も可能です。
+さらに WebView で会話のHTMLプレビュー表示も可能です。
 
 ## 目次
 
@@ -25,8 +25,6 @@ Office/PDF 等のバイナリ読込（`readbinary`）にも対応し、抽出可
   - [安全対策・制約](#安全対策制約)
   - [トラブルシューティング](#トラブルシューティング)
   - [ライセンス](#ライセンス)
-    - [サードパーティライセンス](#サードパーティライセンス)
-      - [RichTextFX](#richtextfx)
 
 ## プロジェクト概要
 
@@ -45,7 +43,7 @@ java_MyAgent2 は、ローカル開発支援を目的としたデスクトップ
   - 複数行入力
   - Ctrl+Enter で送信
   - Shift+Enter で改行
-  - WebView タブで会話プレビュー表示
+  - WebView で会話プレビュー表示
   - ツール実行結果の折りたたみ表示
 - 応答生成
   - 非同期処理（UI ブロック回避）
@@ -281,18 +279,3 @@ gradlew :app:test
 ## ライセンス
 このプロジェクトはMITライセンスの下で公開されています。詳細はLICENSEファイルを参照してください。
 
-### サードパーティライセンス
-#### RichTextFX
-https://github.com/FXMisc/RichTextFX/
-```
-Copyright (c) 2013-2023, Tomas Mikula and contributors
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```

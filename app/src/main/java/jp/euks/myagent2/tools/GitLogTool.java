@@ -10,7 +10,8 @@ import java.util.regex.Pattern;
 /**
  * git ログ参照用のユーティリティ。
  *
- * <p>読み取り専用で `git log` / `git show` を実行し、その出力を整形して返す。
+ * <p>
+ * 読み取り専用で `git log` / `git show` を実行し、その出力を整形して返す。
  * 引数検証・行数制限を行って安全に利用できるように設計されています。
  */
 public class GitLogTool {
@@ -33,6 +34,7 @@ public class GitLogTool {
     /**
      * 指定ディレクトリを基点に git ログを参照するツールを作成します。
      * ディレクトリが git リポジトリ内であれば自動的にルートを検出し、そうでなければ指定ディレクトリをそのまま使用します。
+     * 
      * @param workDir 基点となるディレクトリ
      */
     public GitLogTool(Path workDir) {
@@ -42,7 +44,8 @@ public class GitLogTool {
     /**
      * 指定ディレクトリを基点に git ログを参照するツールを作成します。
      * ディレクトリが git リポジトリ内であれば自動的にルートを検出し、そうでなければ指定ディレクトリをそのまま使用します。
-     * @param workDir 基点となるディレクトリ
+     * 
+     * @param workDir       基点となるディレクトリ
      * @param maxLogEntries 最大ログエントリ数
      */
     GitLogTool(Path workDir, int maxLogEntries) {
@@ -51,16 +54,18 @@ public class GitLogTool {
     }
 
     /**
-     * 指定ディレクトリから git のリポジトリルートを検出して返す。
-     * 検出に失敗した場合は元のディレクトリをそのまま使う。
+     * 指定ディレクトリから git リポジトリのルートを検出します。
+     *
+     * @param dir 検索を開始する基点となるディレクトリ
+     * @return 検出されたリポジトリのルートパス（未検出時は引数の dir を返す）
      */
     private static Path resolveGitRoot(Path dir) {
         try {
             Process proc = new ProcessBuilder("git", "rev-parse", "--show-toplevel")
-                .directory(dir.toFile())
-                .start();
+                    .directory(dir.toFile())
+                    .start();
             String output = new String(proc.getInputStream().readAllBytes(),
-                java.nio.charset.StandardCharsets.UTF_8).strip();
+                    java.nio.charset.StandardCharsets.UTF_8).strip();
             proc.waitFor();
             if (!output.isBlank()) {
                 return Path.of(output);
@@ -76,8 +81,10 @@ public class GitLogTool {
     /**
      * git のログ（最近の N 件）を返す。ファイル・著者・日付範囲で絞り込める。
      *
-     * <p>すべての引数が空文字の場合は {@code --all --graph --name-status} で
-     * リポジトリ全体の履歴をグラフ表示する。</p>
+     * <p>
+     * すべての引数が空文字の場合は {@code --all --graph --name-status} で
+     * リポジトリ全体の履歴をグラフ表示する。
+     * </p>
      *
      * @param file   ファイルパスでの絞り込み（空文字で絞り込みなし）
      * @param author コミット者名での絞り込み（空文字で絞り込みなし、部分一致）
@@ -164,7 +171,9 @@ public class GitLogTool {
     /**
      * ローカルおよびリモートのブランチ一覧を返す。
      *
-     * <p>{@code git branch -a} を実行し、ブランチ名と現在チェックアウト中のブランチ（*）を表示する。</p>
+     * <p>
+     * {@code git branch -a} を実行し、ブランチ名と現在チェックアウト中のブランチ（*）を表示する。
+     * </p>
      *
      * @return {@code (tool:gitbranch)} プレフィックス付きの出力、またはエラー文字列
      */
@@ -176,7 +185,9 @@ public class GitLogTool {
     /**
      * git show を実行してコミット内容や差分統計を返す（読み取り専用）。
      *
-     * <p>引数は空であってはならず、安全な形式であることを検証する。危険な引数は拒否する。</p>
+     * <p>
+     * 引数は空であってはならず、安全な形式であることを検証する。危険な引数は拒否する。
+     * </p>
      *
      * @param args git show に渡す引数（例: "HEAD"、または "HEAD -- path"）
      * @return `(tool:gitshow)` プレフィックス付きの出力、またはエラー文字列
@@ -197,21 +208,30 @@ public class GitLogTool {
         return run("(tool:gitshow)", cmd, false, MAX_SHOW_LINES);
     }
 
+    /**
+     * 指定した git コマンドを実行して出力を受け取り、行数制限や正規化を適用して返します。
+     *
+     * @param prefix                  出力に付与するプレフィックス（例: "(tool:gitlog)"）
+     * @param cmd                     実行するコマンド引数リスト
+     * @param normalizeGraphBackslash true の場合、グラフ表示のバックスラッシュを表示用に置換する
+     * @param maxLines                最大行数（超過時は省略メッセージを付与）
+     * @return 整形済みの出力文字列（プレフィックス付き）またはエラー文字列
+     */
     private String run(String prefix, List<String> cmd, boolean normalizeGraphBackslash, int maxLines) {
         try {
             Process proc = new ProcessBuilder(cmd)
-                .directory(workDir.toFile())
-                .redirectErrorStream(true)
-                .start();
+                    .directory(workDir.toFile())
+                    .redirectErrorStream(true)
+                    .start();
 
             String rawOutput = new String(proc.getInputStream().readAllBytes(), StandardCharsets.UTF_8).stripTrailing();
             String displayOutput = normalizeGraphBackslash
-                ? normalizeGraphOutput(rawOutput)
-                : rawOutput;
+                    ? normalizeGraphOutput(rawOutput)
+                    : rawOutput;
             int exitCode = proc.waitFor();
 
             if (exitCode != 0 && displayOutput.isBlank()) {
-                return "(tool:error) git コマンドが失敗しました (exit=" + exitCode + ")";
+                return "(tool:error) git コマンドが失敗しました (exit=%s)".formatted(exitCode);
             }
 
             List<String> lines = List.of(displayOutput.split("\n"));
@@ -219,10 +239,10 @@ public class GitLogTool {
             if (totalLines > maxLines) {
                 lines = lines.subList(0, maxLines);
                 return prefix + "\n" + String.join("\n", lines)
-                    + "\n... (省略: " + totalLines + " 行中 " + maxLines + " 行を表示)";
+                        + "\n... (省略: %s 行中 ".formatted(totalLines) + maxLines + " 行を表示)";
             }
 
-            return prefix + " (" + totalLines + " 行)\n" + displayOutput;
+            return prefix + " (%s 行)\n".formatted(totalLines) + displayOutput;
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
@@ -232,39 +252,58 @@ public class GitLogTool {
     }
 
     /**
-     * Windows日本語環境で '\\' が '￥' に見える問題を回避するため、
-     * git graph の斜線を表示用文字へ置換する。
+     * git graph 表示のバックスラッシュを表示用文字に置換します（Windows の表示問題回避）。
+     *
+     * @param output 生の git 出力文字列
+     * @return 置換後の文字列
      */
     private String normalizeGraphOutput(String output) {
         return output.replace('\\', GRAPH_BACKSLASH_REPLACEMENT);
     }
 
+    /**
+     * git log のファイル引数が安全かを検証します。
+     *
+     * @param arg 検証対象のファイル引数文字列
+     * @return 安全であれば true
+     */
     private boolean isSafeLogArg(String arg) {
         String normalized = arg.trim();
         return !normalized.isEmpty()
-            && normalized.length() <= MAX_ARG_LENGTH
-            && !normalized.startsWith("-")
-            && SAFE_GIT_TOKEN.matcher(normalized).matches();
+                && normalized.length() <= MAX_ARG_LENGTH
+                && !normalized.startsWith("-")
+                && SAFE_GIT_TOKEN.matcher(normalized).matches();
     }
 
     /**
-     * コミット者名として安全な文字列かを検証する。
-     * Unicode 文字・数字・空白・ドット・ハイフン・アンダースコア・@ を許可する。
+     * 著者名引数が安全で許容される形式かを検証します。
+     *
+     * @param author 検証対象の著者名文字列
+     * @return 安全であれば true
      */
     private boolean isSafeAuthorArg(String author) {
         String normalized = author.trim();
         return !normalized.isEmpty()
-            && normalized.length() <= MAX_ARG_LENGTH
-            && SAFE_AUTHOR.matcher(normalized).matches();
+                && normalized.length() <= MAX_ARG_LENGTH
+                && SAFE_AUTHOR.matcher(normalized).matches();
     }
 
     /**
-     * 日付として安全な文字列かを検証する（YYYY-MM-DD または YYYY/MM/DD）。
+     * 日付引数が YYYY-MM-DD または YYYY/MM/DD の形式かを検証します。
+     *
+     * @param date 検証対象の日付文字列
+     * @return 形式が妥当であれば true
      */
     private boolean isSafeDateArg(String date) {
         return SAFE_DATE.matcher(date.trim()).matches();
     }
 
+    /**
+     * git show に渡す引数列が安全かを検証します（-- 区切りやパスの安全性を確認）。
+     *
+     * @param args 検証対象の引数文字列
+     * @return 安全であれば true
+     */
     private boolean isSafeShowArgs(String args) {
         String normalized = args.trim();
         if (normalized.isEmpty() || normalized.length() > MAX_ARG_LENGTH) {
@@ -294,3 +333,4 @@ public class GitLogTool {
         return true;
     }
 }
+

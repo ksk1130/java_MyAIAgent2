@@ -1,5 +1,7 @@
 package jp.euks.myagent2.tools;
+
 
+import java.util.Objects;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -7,7 +9,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.FormulaEvaluator;
@@ -36,15 +37,15 @@ public class ExcelReaderTool {
      * @param baseDir 相対パス解決の基点ディレクトリ
      */
     public ExcelReaderTool(Path baseDir) {
-        this.baseDir = baseDir == null ? null : baseDir.toAbsolutePath().normalize();
+        this.baseDir = Objects.isNull(baseDir) ? null : baseDir.toAbsolutePath().normalize();
     }
 
     /**
      * 指定したシートとセル範囲の表示値を返す。
      *
-     * @param path Excel ブックのパス
+     * @param path      Excel ブックのパス
      * @param sheetName シート名
-     * @param range セル範囲（例: A1:C3）
+     * @param range     セル範囲（例: A1:C3）
      * @return 読み取り結果またはエラーメッセージ
      */
     public String readRange(String path, String sheetName, String range) {
@@ -55,8 +56,8 @@ public class ExcelReaderTool {
             }
 
             String ext = getExtension(workbookPath);
-            if (ext == null || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
-                return "ERROR: extension not allowed: " + (ext == null ? "(none)" : ext);
+            if (Objects.isNull(ext) || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
+                return "ERROR: extension not allowed: " + (Objects.isNull(ext) ? "(none)" : ext);
             }
 
             Matcher matcher = RANGE_PATTERN.matcher(range.trim());
@@ -72,13 +73,13 @@ public class ExcelReaderTool {
             int lastCol = Math.max(start.getCol(), end.getCol());
             int cellCount = (lastRow - firstRow + 1) * (lastCol - firstCol + 1);
             if (cellCount > MAX_CELLS) {
-                return "ERROR: Range too large. Maximum " + MAX_CELLS + " cells.";
+                return "ERROR: Range too large. Maximum %s cells.".formatted(MAX_CELLS);
             }
 
             try (InputStream inputStream = Files.newInputStream(workbookPath);
-                 Workbook workbook = WorkbookFactory.create(inputStream)) {
+                    Workbook workbook = WorkbookFactory.create(inputStream)) {
                 Sheet sheet = workbook.getSheet(sheetName);
-                if (sheet == null) {
+                if (Objects.isNull(sheet)) {
                     return "ERROR: Sheet not found: " + sheetName;
                 }
 
@@ -122,12 +123,12 @@ public class ExcelReaderTool {
             }
 
             String ext = getExtension(workbookPath);
-            if (ext == null || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
-                return "ERROR: extension not allowed: " + (ext == null ? "(none)" : ext);
+            if (Objects.isNull(ext) || !ALLOWED_EXTS.contains(ext.toLowerCase(Locale.ROOT))) {
+                return "ERROR: extension not allowed: " + (Objects.isNull(ext) ? "(none)" : ext);
             }
 
             try (InputStream inputStream = Files.newInputStream(workbookPath);
-                 Workbook workbook = WorkbookFactory.create(inputStream)) {
+                    Workbook workbook = WorkbookFactory.create(inputStream)) {
                 DataFormatter formatter = new DataFormatter(Locale.ROOT);
                 FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
                 StringBuilder result = new StringBuilder();
@@ -173,6 +174,12 @@ public class ExcelReaderTool {
         }
     }
 
+    /**
+     * 指定パス文字列を Path に解決します。相対パスの場合は baseDir を基点に解決します。
+     *
+     * @param path 読み込むファイルのパス文字列（絶対または相対）
+     * @return 解決された正規化済みの Path
+     */
     private Path resolvePath(String path) {
         Path raw = Path.of(path);
         if (baseDir != null && !raw.isAbsolute()) {
@@ -181,6 +188,16 @@ public class ExcelReaderTool {
         return raw.toAbsolutePath().normalize();
     }
 
+    /**
+     * 指定シートのセル値を表示形式で取得します。
+     *
+     * @param sheet     対象のシート
+     * @param rowIndex  行インデックス（0始まり）
+     * @param colIndex  列インデックス（0始まり）
+     * @param formatter セル表示用フォーマッタ
+     * @param evaluator 数式評価器
+     * @return セルの表示文字列（セル未存在時は空文字）
+     */
     private static String readCellValue(
             Sheet sheet,
             int rowIndex,
@@ -188,16 +205,22 @@ public class ExcelReaderTool {
             DataFormatter formatter,
             FormulaEvaluator evaluator) {
         Row row = sheet.getRow(rowIndex);
-        if (row == null) {
+        if (Objects.isNull(row)) {
             return "";
         }
         Cell cell = row.getCell(colIndex);
-        if (cell == null) {
+        if (Objects.isNull(cell)) {
             return "";
         }
         return formatter.formatCellValue(cell, evaluator);
     }
 
+    /**
+     * パスから拡張子を抽出して返します。
+     *
+     * @param path 対象のファイルパス
+     * @return 拡張子（存在しない場合は null）
+     */
     private static String getExtension(Path path) {
         String name = path.getFileName().toString();
         int dotIndex = name.lastIndexOf('.');
@@ -207,3 +230,5 @@ public class ExcelReaderTool {
         return name.substring(dotIndex + 1);
     }
 }
+
+

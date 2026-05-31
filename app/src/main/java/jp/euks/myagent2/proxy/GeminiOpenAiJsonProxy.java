@@ -1,13 +1,14 @@
 package jp.euks.myagent2.proxy;
 
+
+
+import java.util.Objects;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-
 import jp.euks.myagent2.chat.ChatMessage;
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,11 +22,20 @@ import java.util.UUID;
 public final class GeminiOpenAiJsonProxy {
     private static final Gson GSON = new Gson();
 
+    /**
+     * 会話履歴を OpenAI Chat Completions の入力 JSON に変換する。
+     */
     private GeminiOpenAiJsonProxy() {
     }
 
     /**
-     * 会話履歴を OpenAI Chat Completions の入力 JSON に変換する。
+     * OpenAI Chat Completions 用のリクエスト JSON を生成します。
+     *
+     * @param model        使用するモデル名
+     * @param history      会話履歴（ChatMessage のリスト）
+     * @param userMessage  現在のユーザーメッセージ
+     * @param systemPrompt システムプロンプト（null 可）
+     * @return OpenAI 互換の JSON 文字列
      */
     public static String toOpenAiRequestJson(
             String model,
@@ -45,7 +55,7 @@ public final class GeminiOpenAiJsonProxy {
 
         if (history != null) {
             for (ChatMessage message : history) {
-                if (message == null || message.role() == null) {
+                if (Objects.isNull(message) || Objects.isNull(message.role())) {
                     continue;
                 }
                 if (!isOpenAiRole(message.role())) {
@@ -90,23 +100,22 @@ public final class GeminiOpenAiJsonProxy {
             JsonObject message = element.getAsJsonObject();
             String role = message.has("role") ? message.get("role").getAsString() : "";
             String content = readStringContent(message);
+            jp.euks.myagent2.chat.ChatRole r = jp.euks.myagent2.chat.ChatRole.parse(role);
 
-            if ("system".equals(role)) {
+            if (r == jp.euks.myagent2.chat.ChatRole.SYSTEM) {
                 if (!content.isBlank()) {
                     systemTexts.add(content);
                 }
                 continue;
             }
-
-            if ("user".equals(role) || "assistant".equals(role)) {
+            if (r == jp.euks.myagent2.chat.ChatRole.USER || r == jp.euks.myagent2.chat.ChatRole.ASSISTANT) {
                 JsonArray parts = new JsonArray();
                 if (!content.isBlank()) {
                     JsonObject textPart = new JsonObject();
                     textPart.addProperty("text", content);
                     parts.add(textPart);
                 }
-
-                if ("assistant".equals(role) && message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
+                if (r == jp.euks.myagent2.chat.ChatRole.ASSISTANT && message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
                     JsonArray toolCalls = message.getAsJsonArray("tool_calls");
                     for (JsonElement toolCallElement : toolCalls) {
                         if (!toolCallElement.isJsonObject()) {
@@ -128,7 +137,8 @@ public final class GeminiOpenAiJsonProxy {
                         JsonObject functionCallPart = new JsonObject();
                         JsonObject functionCall = new JsonObject();
                         functionCall.addProperty("name", toolName);
-                        functionCall.add("args", parseJsonObjectOrEmpty(function.has("arguments") ? function.get("arguments") : null));
+                        functionCall.add("args",
+                                parseJsonObjectOrEmpty(function.has("arguments") ? function.get("arguments") : null));
                         functionCallPart.add("functionCall", functionCall);
                         parts.add(functionCallPart);
                     }
@@ -139,13 +149,13 @@ public final class GeminiOpenAiJsonProxy {
                 }
 
                 JsonObject contentObject = new JsonObject();
-                contentObject.addProperty("role", "assistant".equals(role) ? "model" : "user");
+                contentObject.addProperty("role", r == jp.euks.myagent2.chat.ChatRole.ASSISTANT ? "model" : "user");
                 contentObject.add("parts", parts);
                 contents.add(contentObject);
                 continue;
             }
 
-            if ("tool".equals(role)) {
+            if (r == jp.euks.myagent2.chat.ChatRole.TOOL) {
                 String toolCallId = message.has("tool_call_id") ? message.get("tool_call_id").getAsString() : "";
                 String toolName = toolCallIdToName.getOrDefault(toolCallId, "tool");
                 JsonObject contentObject = new JsonObject();
@@ -191,8 +201,13 @@ public final class GeminiOpenAiJsonProxy {
     }
 
     /**
-     * Gemini 形式レスポンス JSON を OpenAI Chat Completions 形式へ変換する。
+     * Gemini レスポンスを OpenAI Chat Completions 互換のレスポンス JSON に変換します。
+     *
+     * @param geminiResponseJson Gemini 形式のレスポンス JSON
+     * @param model              モデル名
+     * @return OpenAI 互換のレスポンス JSON
      */
+
     public static String toOpenAiResponseJson(String geminiResponseJson, String model) {
         JsonObject geminiRoot = JsonParser.parseString(geminiResponseJson).getAsJsonObject();
 
@@ -233,7 +248,10 @@ public final class GeminiOpenAiJsonProxy {
     }
 
     /**
-     * Gemini レスポンスを診断しやすい要約文字列を返す。
+     * Gemini レスポンス JSON の簡易サマリを返します（候補数・関数呼び出し数等）。
+     *
+     * @param geminiResponseJson Gemini レスポンス JSON
+     * @return 要約文字列
      */
     public static String summarizeGeminiResponse(String geminiResponseJson) {
         try {
@@ -249,8 +267,8 @@ public final class GeminiOpenAiJsonProxy {
                 if (!candidates.isEmpty() && candidates.get(0).isJsonObject()) {
                     JsonObject first = candidates.get(0).getAsJsonObject();
                     finishReason = first.has("finishReason") && !first.get("finishReason").isJsonNull()
-                        ? first.get("finishReason").getAsString()
-                        : "";
+                            ? first.get("finishReason").getAsString()
+                            : "";
                     if (first.has("content") && first.get("content").isJsonObject()) {
                         JsonObject content = first.getAsJsonObject("content");
                         if (content.has("parts") && content.get("parts").isJsonArray()) {
@@ -279,11 +297,9 @@ public final class GeminiOpenAiJsonProxy {
                 }
             }
 
-            return "candidates=" + candidateCount
-                + ", finishReason=" + (finishReason.isBlank() ? "(none)" : finishReason)
-                + ", textChars=" + textChars
-                + ", functionCalls=" + functionCallCount
-                + ", blockReason=" + (blockReason.isBlank() ? "(none)" : blockReason);
+            return "candidates=%s, finishReason=".formatted(candidateCount) + (finishReason.isBlank() ? "(none)" : finishReason)
+                    + ", textChars=%s, functionCalls=".formatted(textChars) + functionCallCount
+                    + ", blockReason=" + (blockReason.isBlank() ? "(none)" : blockReason);
         } catch (RuntimeException e) {
             return "summary-parse-error=" + e.getClass().getSimpleName();
         }
@@ -296,8 +312,8 @@ public final class GeminiOpenAiJsonProxy {
         try {
             JsonObject root = JsonParser.parseString(openAiResponseJson).getAsJsonObject();
             int choicesCount = root.has("choices") && root.get("choices").isJsonArray()
-                ? root.getAsJsonArray("choices").size()
-                : 0;
+                    ? root.getAsJsonArray("choices").size()
+                    : 0;
 
             int contentChars = 0;
             int toolCalls = 0;
@@ -306,8 +322,8 @@ public final class GeminiOpenAiJsonProxy {
             if (choicesCount > 0) {
                 JsonObject firstChoice = root.getAsJsonArray("choices").get(0).getAsJsonObject();
                 finishReason = firstChoice.has("finish_reason") && !firstChoice.get("finish_reason").isJsonNull()
-                    ? firstChoice.get("finish_reason").getAsString()
-                    : "";
+                        ? firstChoice.get("finish_reason").getAsString()
+                        : "";
                 if (firstChoice.has("message") && firstChoice.get("message").isJsonObject()) {
                     JsonObject message = firstChoice.getAsJsonObject("message");
                     if (message.has("content") && !message.get("content").isJsonNull()) {
@@ -319,17 +335,18 @@ public final class GeminiOpenAiJsonProxy {
                 }
             }
 
-            return "choices=" + choicesCount
-                + ", finish_reason=" + (finishReason.isBlank() ? "(none)" : finishReason)
-                + ", contentChars=" + contentChars
-                + ", toolCalls=" + toolCalls;
+            return "choices=%s, finish_reason=".formatted(choicesCount) + (finishReason.isBlank() ? "(none)" : finishReason)
+                    + ", contentChars=%s, toolCalls=".formatted(contentChars) + toolCalls;
         } catch (RuntimeException e) {
             return "summary-parse-error=" + e.getClass().getSimpleName();
         }
     }
 
     /**
-     * OpenAI 形式レスポンス JSON から assistant の content を取り出す。
+     * OpenAI 形式レスポンス JSON の簡易サマリを返します。
+     *
+     * @param openAiResponseJson OpenAI 形式のレスポンス JSON
+     * @return 要約文字列
      */
     public static String extractAssistantTextFromOpenAiResponse(String openAiResponseJson) {
         JsonObject root = JsonParser.parseString(openAiResponseJson).getAsJsonObject();
@@ -348,21 +365,28 @@ public final class GeminiOpenAiJsonProxy {
         return message.has("content") ? nullSafe(message.get("content").getAsString()) : "";
     }
 
+    /**
+     * Gemini レスポンス JSON からテキスト・ツール呼び出し情報・フォールバックメッセージを抽出します。
+     *
+     * @param geminiRoot 解析対象の Gemini JSON オブジェクト
+     * @return 抽出結果を格納した ResponseParts
+     */
     private static ResponseParts extractResponsePartsFromGemini(JsonObject geminiRoot) {
         ResponseParts result = new ResponseParts();
 
         if (geminiRoot.has("promptFeedback") && geminiRoot.get("promptFeedback").isJsonObject()) {
             JsonObject promptFeedback = geminiRoot.getAsJsonObject("promptFeedback");
             String blockReason = promptFeedback.has("blockReason") && !promptFeedback.get("blockReason").isJsonNull()
-                ? promptFeedback.get("blockReason").getAsString()
-                : "";
-            String blockMessage = promptFeedback.has("blockReasonMessage") && !promptFeedback.get("blockReasonMessage").isJsonNull()
-                ? promptFeedback.get("blockReasonMessage").getAsString()
-                : "";
+                    ? promptFeedback.get("blockReason").getAsString()
+                    : "";
+            String blockMessage = promptFeedback.has("blockReasonMessage")
+                    && !promptFeedback.get("blockReasonMessage").isJsonNull()
+                            ? promptFeedback.get("blockReasonMessage").getAsString()
+                            : "";
             if (!blockReason.isBlank() || !blockMessage.isBlank()) {
                 result.fallbackMessage = "(gemini) 応答がブロックされました: "
-                    + (blockReason.isBlank() ? "UNKNOWN" : blockReason)
-                    + (blockMessage.isBlank() ? "" : " - " + blockMessage);
+                        + (blockReason.isBlank() ? "UNKNOWN" : blockReason)
+                        + (blockMessage.isBlank() ? "" : " - " + blockMessage);
             }
         }
 
@@ -377,8 +401,8 @@ public final class GeminiOpenAiJsonProxy {
 
         JsonObject first = candidates.get(0).getAsJsonObject();
         String finishReason = first.has("finishReason") && !first.get("finishReason").isJsonNull()
-            ? first.get("finishReason").getAsString()
-            : "";
+                ? first.get("finishReason").getAsString()
+                : "";
         if (!finishReason.isBlank() && !"STOP".equals(finishReason)) {
             result.fallbackMessage = "(gemini) 生成が完了しませんでした: " + finishReason;
         }
@@ -452,8 +476,14 @@ public final class GeminiOpenAiJsonProxy {
         return text.toString();
     }
 
+    /**
+     * JsonElement を JsonObject に安全に変換します。変換できない場合は空の JsonObject を返します。
+     *
+     * @param source 変換元の JsonElement
+     * @return JsonObject（変換不能時は空のオブジェクト）
+     */
     private static JsonObject parseJsonObjectOrEmpty(JsonElement source) {
-        if (source == null || source.isJsonNull()) {
+        if (Objects.isNull(source) || source.isJsonNull()) {
             return new JsonObject();
         }
         try {
@@ -511,17 +541,35 @@ public final class GeminiOpenAiJsonProxy {
         return result;
     }
 
+    /**
+     * OpenAI の role 文字列が有効な role かを判定します。
+     *
+     * @param role 判定対象の role 文字列
+     * @return 有効な role であれば true
+     */
     private static boolean isOpenAiRole(String role) {
-        return "system".equals(role) || "user".equals(role) || "assistant".equals(role);
+        jp.euks.myagent2.chat.ChatRole r = jp.euks.myagent2.chat.ChatRole.parse(role);
+        return r == jp.euks.myagent2.chat.ChatRole.SYSTEM || r == jp.euks.myagent2.chat.ChatRole.USER || r == jp.euks.myagent2.chat.ChatRole.ASSISTANT;
     }
 
+    /**
+     * null を空文字に変換します。
+     *
+     * @param text 入力文字列
+     * @return null の場合は空文字、それ以外は元の文字列
+     */
     private static String nullSafe(String text) {
-        return text == null ? "" : text;
+        return Objects.isNull(text) ? "" : text;
     }
 
+    /**
+     * Gemini レスポンスから抽出したテキスト・ツール呼び出し情報・フォールバックメッセージを格納するクラス。
+     */
     private static final class ResponseParts {
         private String text = "";
         private String fallbackMessage = "";
         private final JsonArray toolCalls = new JsonArray();
     }
 }
+
+

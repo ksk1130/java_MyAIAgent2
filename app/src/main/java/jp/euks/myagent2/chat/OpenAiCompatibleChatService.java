@@ -1,5 +1,8 @@
 package jp.euks.myagent2.chat;
 
+
+
+import java.util.Objects;
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.openai.OpenAiChatModel;
@@ -12,7 +15,6 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import jp.euks.myagent2.tools.*;
-
 import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Consumer;
@@ -200,7 +202,7 @@ public class OpenAiCompatibleChatService implements ChatService {
 
     @Override
     public void setSystemPrompt(String prompt) {
-        this.systemPrompt = (prompt == null) ? DEFAULT_SYSTEM_PROMPT : prompt;
+        this.systemPrompt = (Objects.isNull(prompt)) ? DEFAULT_SYSTEM_PROMPT : prompt;
     }
 
     @Override
@@ -262,7 +264,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             .onRetrieved(ignored -> {})
             .onToolExecuted(ignored -> {
                 // LangChain4j 1.12.2 では onToolExecution が無いため、実行完了通知で進捗表示を更新する。
-                if (onProgress == null) {
+                if (Objects.isNull(onProgress)) {
                     return;
                 }
                 var executions = toolExecutionTracker.getExecutions();
@@ -327,7 +329,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             .onRetrieved(ignored -> {})
             .onToolExecuted(ignored -> {
                 if (isCancelled.getAsBoolean()) return;
-                if (onProgress == null) {
+                if (Objects.isNull(onProgress)) {
                     return;
                 }
                 var executions = toolExecutionTracker.getExecutions();
@@ -380,7 +382,7 @@ public class OpenAiCompatibleChatService implements ChatService {
 
     @Override
     public void setWorkingDirectory(Path dir) {
-        if (dir == null) {
+        if (Objects.isNull(dir)) {
             return;
         }
         Path normalized = dir.toAbsolutePath().normalize();
@@ -410,7 +412,7 @@ public class OpenAiCompatibleChatService implements ChatService {
 
     @Override
     public void restoreMemory(List<ChatMessage> history) {
-        if (currentChatMemory == null) {
+        if (Objects.isNull(currentChatMemory)) {
             return;
         }
         List<dev.langchain4j.data.message.ChatMessage> langchainHistory = new java.util.ArrayList<>();
@@ -419,22 +421,27 @@ public class OpenAiCompatibleChatService implements ChatService {
 
         if (history != null) {
             for (ChatMessage message : history) {
-            if (message == null || message.role() == null) {
-                continue;
-            }
-            String content = message.content() == null ? "" : message.content();
-            switch (message.role()) {
-                case "user" -> langchainHistory.add(UserMessage.from(content));
-                case "assistant" -> langchainHistory.add(AiMessage.from(content));
-                case "system" -> {
-                    // 既存履歴の system は無視し、現在の設定値を優先する。
+                if (Objects.isNull(message) || Objects.isNull(message.role())) {
+                    continue;
                 }
-                default -> {
+                String content = Objects.isNull(message.content()) ? "" : message.content();
+                jp.euks.myagent2.chat.ChatRole role = jp.euks.myagent2.chat.ChatRole.parse(message.role());
+                if (role == null) continue;
+                switch (role) {
+                    case USER -> langchainHistory.add(UserMessage.from(content));
+                    case ASSISTANT -> langchainHistory.add(AiMessage.from(content));
+                    case SYSTEM -> {
+                        // 既存履歴の system は無視し、現在の設定値を優先する。
+                    }
+                    default -> {
+                    }
                 }
             }
-        }
         }
 
         currentChatMemory.set(langchainHistory);
     }
 }
+
+
+

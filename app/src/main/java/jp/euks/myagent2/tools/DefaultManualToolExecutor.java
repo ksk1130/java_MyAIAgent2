@@ -1,5 +1,7 @@
 package jp.euks.myagent2.tools;
+
 
+import java.util.Objects;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -99,7 +101,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @return ツール出力（`(tool:...)` 形式）または `Optional.empty()`
      */
     public Optional<String> tryExecute(String userMessage) {
-        if (userMessage == null) {
+        if (Objects.isNull(userMessage)) {
             return Optional.empty();
         }
 
@@ -141,48 +143,52 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
             case "readfile" -> runReadFile(args);
             case "readexcel" -> runReadExcel(args);
             case "readbinary" -> runReadBinary(args);
-            default -> "(tool:error) 未知のツールです: " + toolName + "。`/tool help` を使ってください。";
+            default -> "(tool:error) 未知のツールです: %s。`/tool help` を使ってください。".formatted(toolName);
         };
     }
 
     /**
      * gitlog コマンドの引数を解析して GitLogTool を呼び出す。
      *
-     * <p>書式:
+     * <p>
+     * 書式:
      * <ul>
-     *   <li>{@code /tool gitlog} — 全ブランチのグラフ表示</li>
-     *   <li>{@code /tool gitlog src/Foo.java} — ファイル絞り込み</li>
-     *   <li>{@code /tool gitlog --author Alice} — 著者絞り込み</li>
-     *   <li>{@code /tool gitlog --after 2026-04-03} — この日付以降</li>
-     *   <li>{@code /tool gitlog --before 2026-04-10} — この日付以前</li>
-     *   <li>{@code /tool gitlog --after 2026-04-03 --before 2026-04-10} — 範囲指定</li>
-     *   <li>{@code /tool gitlog --author Alice --after 2026-04-01} — 複合指定</li>
+     * <li>{@code /tool gitlog} — 全ブランチのグラフ表示</li>
+     * <li>{@code /tool gitlog src/Foo.java} — ファイル絞り込み</li>
+     * <li>{@code /tool gitlog --author Alice} — 著者絞り込み</li>
+     * <li>{@code /tool gitlog --after 2026-04-03} — この日付以降</li>
+     * <li>{@code /tool gitlog --before 2026-04-10} — この日付以前</li>
+     * <li>{@code /tool gitlog --after 2026-04-03 --before 2026-04-10} — 範囲指定</li>
+     * <li>{@code /tool gitlog --author Alice --after 2026-04-01} — 複合指定</li>
      * </ul>
      * </p>
      */
     private String runGitLog(String args) {
         String author = extractGitOption(args, "author");
-        String after  = extractGitOption(args, "after");
+        String after = extractGitOption(args, "after");
         String before = extractGitOption(args, "before");
 
         // 認識済みオプションをすべて除去し、残りをファイルとして扱う
         String file = args
-            .replaceAll("--author(?:=|\\s+)\\S+", "")
-            .replaceAll("--after(?:=|\\s+)\\S+", "")
-            .replaceAll("--before(?:=|\\s+)\\S+", "")
-            .trim();
+                .replaceAll("--author(?:=|\\s+)\\S+", "")
+                .replaceAll("--after(?:=|\\s+)\\S+", "")
+                .replaceAll("--before(?:=|\\s+)\\S+", "")
+                .trim();
 
         return gitLogTool.log(file, author, after, before);
     }
 
     /**
-     * {@code --optionName VALUE} または {@code --optionName=VALUE} を args から抽出して返す。
-     * 見つからなければ空文字を返す。値はスペースを含まない1トークンのみ対応する。
+     * 指定されたオプション名に対応する値をコマンド引数文字列から抽出して返します。
+     *
+     * @param args       コマンド引数文字列
+     * @param optionName 抽出するオプション名（例: "author", "after"）
+     * @return 見つかった値、見つからなければ空文字
      */
     private static String extractGitOption(String args, String optionName) {
         java.util.regex.Matcher m = java.util.regex.Pattern
-            .compile("--" + optionName + "(?:=|\\s+)(\\S+)")
-            .matcher(args);
+                .compile("--%s(?:=|\\s+)(\\S+)".formatted(optionName))
+                .matcher(args);
         return m.find() ? m.group(1).trim() : "";
     }
 
@@ -213,9 +219,10 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     }
 
     /**
-     * /tool cmd <command> [args...]
-     * ローカルコマンドを実行します。
-     * 例: /tool cmd git log -5
+     * ローカルコマンドを実行するラッパー。
+     *
+     * @param args 実行するコマンドライン文字列
+     * @return 実行結果またはエラーメッセージ
      */
     private String runCmd(String args) {
         if (args.isEmpty()) {
@@ -225,9 +232,10 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     }
 
     /**
-     * /tool setdir <path>
-     * 指定されたディレクトリを作業ディレクトリとして設定し、
-     * grep/gitlog/cmd の基点ツールを再生成します。
+     * 作業ディレクトリを変更して関連ツールを再初期化します。
+     *
+     * @param args 新しい作業ディレクトリのパス文字列
+     * @return 実行結果メッセージまたはエラーメッセージ
      */
     private String runSetDir(String args) {
         if (args.isEmpty()) {
@@ -235,7 +243,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         }
         Path newDir = Path.of(args);
         if (!Files.isDirectory(newDir)) {
-            return "(tool:error) 指定されたパスはディレクトリではありません: " + newDir;
+            return "(tool:error) 指定されたパスはディレクトリではありません: %s".formatted(newDir);
         }
         currentDir = newDir.toAbsolutePath().normalize();
         workspaceGrepTool = new WorkspaceGrepTool(currentDir);
@@ -244,7 +252,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         fileReaderTool = new FileReaderTool(currentDir);
         excelReaderTool = new ExcelReaderTool(currentDir);
         binaryAttachmentStore = new BinaryAttachmentStore(currentDir);
-        return "(tool:setdir) 作業ディレクトリを変更しました: " + currentDir;
+        return "(tool:setdir) 作業ディレクトリを変更しました: %s".formatted(currentDir);
     }
 
     /**
@@ -259,24 +267,28 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         if (args.isEmpty()) {
             return "(tool:error) readfile にはファイルパスが必要です。例: /tool readfile src/main/java/jp/euks/myagent2/feature/chat/App.java";
         }
-        return "(tool:readfile) " + fileReaderTool.readFile(args);
+        return "(tool:readfile) %s".formatted(fileReaderTool.readFile(args));
     }
 
     /**
-     * /tool readexcel <file> <sheet> <range>
-     * Excel ブックから指定範囲の値を読み込んで返します。
+     * Excel 範囲読み取りラッパー。
+     *
+     * @param args 引数文字列（file sheet range の形式）
+     * @return 読み取り結果またはエラーメッセージ
      */
     private String runReadExcel(String args) {
         java.util.List<String> tokens = splitArgs(args);
         if (tokens.size() != 3) {
             return "(tool:error) readexcel には <file> <sheet> <range> が必要です。例: /tool readexcel AAA.xlsx Sheet1 A1:C3";
         }
-        return "(tool:readexcel) " + excelReaderTool.readRange(tokens.get(0), tokens.get(1), tokens.get(2));
+        return "(tool:readexcel) %s".formatted(excelReaderTool.readRange(tokens.get(0), tokens.get(1), tokens.get(2)));
     }
 
     /**
-     * /tool readbinary <path>
-     * バイナリファイルを base64 文字列として返します。
+     * バイナリ読み取りラッパー。
+     *
+     * @param args 引数文字列（path）
+     * @return base64 または抽出テキストを含む結果文字列、またはエラーメッセージ
      */
     private String runReadBinary(String args) {
         java.util.List<String> tokens = splitArgs(args);
@@ -287,36 +299,38 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
             BinaryAttachmentStore.AttachmentMetadata metadata = binaryAttachmentStore.createAttachment(tokens.get(0));
             String extractedText = buildExtractionSection(tokens.get(0));
             if (!extractedText.isEmpty()) {
-                return "(tool:readbinary) file=" + metadata.filename()
-                    + " mime=" + metadata.mimeType()
-                    + " size=" + metadata.sizeBytes()
-                    + " extracted_text=\"" + extractedText.replace("\"", "'") + "\"";
+                return "(tool:readbinary) file=%s mime=".formatted(metadata.filename()) + metadata.mimeType()
+                        + " size=%s extracted_text=\"".formatted(metadata.sizeBytes()) + extractedText.replace("\"", "'") + "\"";
             }
 
             var base64Opt = binaryAttachmentStore.getBase64(metadata.id());
             if (base64Opt.isEmpty()) {
                 return "(tool:error) readbinary の base64 変換に失敗しました";
             }
-            return "(tool:readbinary) file=" + metadata.filename()
-                + " mime=" + metadata.mimeType()
-                + " size=" + metadata.sizeBytes()
-                + " base64=" + base64Opt.get();
+            return "(tool:readbinary) file=%s mime=".formatted(metadata.filename()) + metadata.mimeType()
+                    + " size=%s base64=".formatted(metadata.sizeBytes()) + base64Opt.get();
         } catch (IllegalArgumentException e) {
             return "(tool:error) " + e.getMessage();
         }
     }
 
+    /**
+     * Office ドキュメントや PDF のテキスト抽出セクションを構築します。
+     * 
+     * @param path ファイルパス
+     * @return 抽出されたテキスト（抽出できない場合は空文字）
+     */
     private String buildExtractionSection(String path) {
-        if (path == null) {
+        if (Objects.isNull(path)) {
             return "";
         }
         String lower = path.toLowerCase(Locale.ROOT);
         if (!(lower.endsWith(".xlsx")
-            || lower.endsWith(".xlsm")
-            || lower.endsWith(".xls")
-            || lower.endsWith(".docx")
-            || lower.endsWith(".pptx")
-            || lower.endsWith(".pdf"))) {
+                || lower.endsWith(".xlsm")
+                || lower.endsWith(".xls")
+                || lower.endsWith(".docx")
+                || lower.endsWith(".pptx")
+                || lower.endsWith(".pdf"))) {
             return "";
         }
 
@@ -333,8 +347,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * 現在の作業ディレクトリを表示します。
      */
     private String runGetDir() {
-        return "(tool:getdir) 現在の作業ディレクトリ: "
-                + (currentDir != null ? currentDir.toAbsolutePath().normalize() : "(未設定)");
+        return "(tool:getdir) 現在の作業ディレクトリ: %s"
+                .formatted(Objects.isNull(currentDir) ? "(未設定)" : currentDir.toAbsolutePath().normalize());
     }
 
     /**
@@ -354,7 +368,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool setdir <path>          作業ディレクトリを変更する\n"
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
                 + "  - /tool readfile <path>        テキストファイルを読み込む\n"
-            + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む\n"
+                + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む\n"
                 + "  - /tool readbinary <path>      Office/PDFは本文抽出、それ以外は base64 で読み込む";
     }
 
@@ -366,8 +380,10 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\"([^\"]*)\"|(\\S+)").matcher(args);
         while (matcher.find()) {
             String quoted = matcher.group(1);
-            result.add(quoted != null ? quoted : matcher.group(2));
+            result.add(Objects.isNull(quoted) ? matcher.group(2) : quoted);
         }
         return result;
     }
 }
+
+
