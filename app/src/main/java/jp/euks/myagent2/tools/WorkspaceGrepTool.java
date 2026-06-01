@@ -5,16 +5,22 @@ package jp.euks.myagent2.tools;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
+import java.nio.charset.StandardCharsets;
 
 /**
  * ワークスペース内のファイルを検索するユーティリティ。
@@ -22,10 +28,13 @@ import java.util.stream.Stream;
  */
 public class WorkspaceGrepTool {
     private static final Logger log = LoggerFactory.getLogger(WorkspaceGrepTool.class);
-    private static final int DEFAULT_MAX_MATCHES = 1_000;
+    private static final int DEFAULT_MAX_MATCHES = 10_000;
     private static final int MAX_FILE_SIZE_BYTES = 1_000_000;
     private static final Charset WINDOWS_31J = Charset.forName("Windows-31J");
+    private static final String RG_ENCODING_UTF8 = "utf-8";
+    private static final String RG_ENCODING_SJIS = "sjis";
     private static final int RG_TIMEOUT_SECONDS = 10;
+    private static final int RG_WAIT_SLICE_MILLIS = 100;
 
     private final Path rootDir;
     private final int maxMatches;
@@ -141,16 +150,45 @@ public class WorkspaceGrepTool {
      * @throws IOException ファイル走査時の入出力エラー
      */
     private GrepResult collectMatchesWithSource(String searchPattern, String excludePattern) throws IOException {
-        // rg(UTF-8専用)で高速検索（利用可能時のみ）
+        // rg(UTF-8) と rg(SJIS) は必ず両方試行する（利用可能時のみ）
         if (rgAvailable) {
-            List<String> rgMatches = collectMatchesByRgUtf(searchPattern, excludePattern);
-            if (!rgMatches.isEmpty()) {
-                return new GrepResult("rg", rgMatches);
+            List<String> rgUtfMatches = collectMatchesByRgUtf(searchPattern, excludePattern);
+            List<String> rgSjisMatches = collectMatchesByRgSjis(searchPattern, excludePattern);
+
+            List<String> mergedRgMatches = mergeRgMatches(rgUtfMatches, rgSjisMatches);
+            if (!mergedRgMatches.isEmpty()) {
+                return new GrepResult("rg", mergedRgMatches);
             }
         }
         // Java 実装(Windows-31J専用)でフォールバック
         List<String> javaMatches = collectMatchesByJavaSjis(searchPattern, excludePattern);
         return new GrepResult("java", javaMatches);
+    }
+
+    /**
+     * UTF-8/SJIS の rg 結果を重複排除して結合します。
+     *
+     * @param rgUtfMatches  UTF-8 検索結果
+     * @param rgSjisMatches SJIS 検索結果
+     * @return 重複排除・件数上限適用後の結合結果
+     */
+    private List<String> mergeRgMatches(List<String> rgUtfMatches, List<String> rgSjisMatches) {
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+
+        for (String line : rgUtfMatches) {
+            merged.add(line);
+            if (merged.size() >= maxMatches) {
+                return new ArrayList<>(merged);
+            }
+        }
+        for (String line : rgSjisMatches) {
+            merged.add(line);
+            if (merged.size() >= maxMatches) {
+                return new ArrayList<>(merged);
+            }
+        }
+
+        return new ArrayList<>(merged);
     }
 
     /**
@@ -210,12 +248,35 @@ public class WorkspaceGrepTool {
      * @return フォーマット済みの一致行リスト（存在しなければ空リスト）
      */
     private List<String> collectMatchesByRgUtf(String searchPattern, String excludePattern) {
+        return collectMatchesByRg(searchPattern, excludePattern, RG_ENCODING_UTF8);
+    }
+
+    /**
+     * ripgrep (`rg`) を用いて SJIS エンコーディングで高速検索を行います。
+     *
+     * @param searchPattern  検索パターン（渡されたまま使用されます）
+     * @param excludePattern 除外パターン（小文字化して比較されます）
+     * @return フォーマット済みの一致行リスト（存在しなければ空リスト）
+     */
+    private List<String> collectMatchesByRgSjis(String searchPattern, String excludePattern) {
+        return collectMatchesByRg(searchPattern, excludePattern, RG_ENCODING_SJIS);
+    }
+
+    /**
+     * ripgrep (`rg`) を用いて指定エンコーディングで高速検索を行います。
+     *
+     * @param searchPattern  検索パターン（渡されたまま使用されます）
+     * @param excludePattern 除外パターン（小文字化して比較されます）
+     * @param encoding       `rg --encoding` に渡す文字コード名
+     * @return フォーマット済みの一致行リスト（存在しなければ空リスト）
+     */
+    private List<String> collectMatchesByRg(String searchPattern, String excludePattern, String encoding) {
         List<String> results = new ArrayList<>();
         String excludeNeedle = Objects.isNull(excludePattern) ? null : excludePattern.toLowerCase(Locale.ROOT);
 
         List<String> cmd = new ArrayList<>(Arrays.asList(
                 resolvedRgExe,
-                "--encoding", "utf-8",
+                "--encoding", encoding,
                 "--line-number",
                 "--no-heading",
                 "--color", "never",
@@ -233,49 +294,119 @@ public class WorkspaceGrepTool {
 
         try {
             Process process = pb.start();
-            boolean finished = process.waitFor(RG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            AtomicBoolean reachedLimit = new AtomicBoolean(false);
+            AtomicReference<IOException> readerError = new AtomicReference<>();
+
+            Thread readerThread = new Thread(() -> readRgOutputLines(process, excludeNeedle, results, reachedLimit, readerError),
+                    "workspace-grep-rg-reader");
+            readerThread.setDaemon(true);
+            readerThread.start();
+
+            boolean finished = waitForRgProcess(process, reachedLimit);
             if (!finished) {
                 process.destroyForcibly();
-                log.info("[GREP] rg timed out, fallback to Java grep. command={}", cmd);
+                log.info("[GREP] rg timed out (encoding={}), trying next fallback. command={}", encoding, cmd);
+            }
+
+            try {
+                readerThread.join(1_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            if (reachedLimit.get()) {
                 return results;
             }
 
-            int exitCode = process.exitValue();
-            String output = new String(process.getInputStream().readAllBytes(),
-                    java.nio.charset.StandardCharsets.UTF_8);
-            if (exitCode != 0 && exitCode != 1) {
-                String summary = output.isBlank() ? "(no output)" : output.lines().findFirst().orElse("(no output)");
-                log.info("[GREP] rg failed (exit={}), fallback to Java grep. firstLine={}", exitCode, summary);
+            IOException readError = readerError.get();
+            if (readError != null) {
+                log.info("[GREP] rg output read error (encoding={}), trying next fallback. message={}",
+                        encoding,
+                        readError.getMessage());
                 return results;
             }
 
-            if (output.isBlank()) {
-                return results;
-            }
-
-            String[] lines = output.split("\\R");
-            for (String line : lines) {
-                if (line == null || line.isBlank()) {
-                    continue;
-                }
-                String formatted = formatRgOutputLine(line, excludeNeedle);
-                if (Objects.isNull(formatted)) {
-                    continue;
-                }
-                results.add(formatted);
-                if (results.size() >= maxMatches) {
-                    break;
+            if (finished) {
+                int exitCode = process.exitValue();
+                if (exitCode != 0 && exitCode != 1) {
+                    String summary = results.isEmpty() ? "(no output)" : results.get(0);
+                    log.info("[GREP] rg failed (encoding={}, exit={}), trying next fallback. firstLine={}",
+                            encoding,
+                            exitCode,
+                            summary);
+                    return results;
                 }
             }
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            log.info("[GREP] rg execution error, fallback to Java grep. message={}", e.getMessage());
+            log.info("[GREP] rg execution error (encoding={}), trying next fallback. message={}",
+                    encoding,
+                    e.getMessage());
             return results;
         }
 
         return results;
+    }
+
+    /**
+     * rg プロセスの標準出力を逐次読み取り、必要行だけ結果へ追加します。
+     * @param process       rg プロセス
+     * @param excludeNeedle 除外パターン（小文字化済み、指定がなければ null）
+     * @param results       マッチ行を追加するリスト
+     * @param reachedLimit  結果上限に到達した場合は true をセットするフラグ
+     * @param readerError   読み取り中に発生した IOException をセット
+     */
+    private void readRgOutputLines(
+            Process process,
+            String excludeNeedle,
+            List<String> results,
+            AtomicBoolean reachedLimit,
+            AtomicReference<IOException> readerError) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isBlank()) {
+                    continue;
+                }
+                String formatted = formatRgOutputLine(line, excludeNeedle);
+                if (Objects.isNull(formatted)) {
+                    continue;
+                }
+                if (results.size() < maxMatches) {
+                    results.add(formatted);
+                }
+                if (results.size() >= maxMatches) {
+                    reachedLimit.set(true);
+                    return;
+                }
+            }
+        } catch (IOException e) {
+            readerError.set(e);
+        }
+    }
+
+    /**
+     * rg プロセスをタイムアウト付きで監視します。上限到達時は早期終了扱いにします。
+     * @param process       監視する rg プロセス
+     * @param reachedLimit  結果上限に到達した場合は true をセットするフラグ
+     * @return プロセスが正常終了した場合は true、タイムアウトや上限到達で強制終了した場合は false
+     * @throws InterruptedException 待機中に割り込みが発生した場合
+     */
+    private boolean waitForRgProcess(Process process, AtomicBoolean reachedLimit) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(RG_TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadlineNanos) {
+            if (reachedLimit.get()) {
+                process.destroyForcibly();
+                return true;
+            }
+            if (process.waitFor(RG_WAIT_SLICE_MILLIS, TimeUnit.MILLISECONDS)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

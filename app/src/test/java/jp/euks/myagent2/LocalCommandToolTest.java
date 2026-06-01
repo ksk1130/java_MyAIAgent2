@@ -103,6 +103,23 @@ public class LocalCommandToolTest {
     }
 
     @Test
+    public void testExecuteAllowsDoubleQuotedRgPattern() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("rg -ie \"博物\" .");
+
+        // 二重引用符付きでも危険記号エラーで拒否されないことを確認
+        assertFalse(result, result.contains("危険な記号"));
+    }
+
+    @Test
+    public void testExecuteRejectsUnclosedQuote() {
+        LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
+        String result = tool.execute("rg -ie \"博物 .");
+
+        assertTrue(result, result.contains("引用符が閉じられていません"));
+    }
+
+    @Test
     public void testExecuteAllowsNkfCommand() {
         LocalCommandTool tool = new LocalCommandTool(Path.of(System.getProperty("user.dir")));
         String result = tool.execute("nkf --version");

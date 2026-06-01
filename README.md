@@ -16,6 +16,7 @@ Office/PDF 等のバイナリ読込（`readbinary`）にも対応し、抽出可
   - [動作環境](#動作環境)
   - [セットアップ](#セットアップ)
   - [起動方法](#起動方法)
+  - [addons ディレクトリ運用](#addons-ディレクトリ運用)
   - [使い方](#使い方)
   - [ツール一覧](#ツール一覧)
   - [設定（環境変数）](#設定環境変数)
@@ -108,6 +109,27 @@ gradlew :app:run
 ```
 
 起動後、GUI 画面でチャットを開始できます。
+
+## addons ディレクトリ運用
+
+外部コマンド実行ファイル（`rg`, `grep`, `nkf` など）を同梱したい場合は、`addons` ディレクトリに配置します。
+
+- 推奨配置先
+  - アプリ起動ディレクトリ配下の `addons`
+- 代表例
+  - `addons/rg.exe`
+  - `addons/grep.exe`
+  - `addons/nkf.exe`
+
+解決順の概要:
+
+- `WorkspaceGrepTool`（`/tool grep`）
+  - ワークスペース直下の `addons/rg(.exe)`
+  - 次にアプリ起動ディレクトリ直下の `addons/rg(.exe)`
+  - 最後に PATH 上の `rg`
+- `LocalCommandTool`（`/tool cmd` / `localcmd`）
+  - アプリ起動時に固定した `addons` を優先
+  - 見つからない場合は PATH / Git Bash 側を利用
 
 ## 使い方
 
@@ -244,7 +266,13 @@ gradlew :app:test
 - 拡張子ホワイトリスト方式
 - 相対パスを基本とした運用
 - 読み取り時の文字コードフォールバック（UTF-8 優先、Shift_JIS 対応）
-- `/tool grep` は各ファイルを「UTF-8→Shift_JIS（CP932）」の順で自動判定し、どちらかで正しく読めた場合のみ検索対象とします。UTF-8/SJIS混在プロジェクトでも横断検索できます。
+- `/tool grep` は次の順序で検索します。
+  - `rg --encoding utf-8`
+  - `rg --encoding sjis`
+  - 上記の両方が 0 件の場合のみ Java 実装（Windows-31J）
+  - UTF-8 と SJIS の `rg` は常に両方実行し、結果は重複排除して結合
+  - `rg` 出力は逐次読み取り（ストリーミング処理）で処理し、大量ヒット時のメモリ使用量を抑制
+  - 検索上限は既定 10,000 件
 
 `readbinary` は以下の制限で動作します。
 
