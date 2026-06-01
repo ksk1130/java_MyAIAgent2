@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.junit.Test;
+import org.junit.Assume;
 
 import jp.euks.myagent2.tools.LocalCommandTool;
 
@@ -100,6 +101,30 @@ public class LocalCommandToolTest {
         
         // コマンド不在は仕方ないが、許可コマンドリストに含まれていることを確認
         assertFalse(result, result.contains("許可されていないコマンドです"));
+    }
+
+    @Test
+    public void testExecuteRgLargeOutputDoesNotTimeout() throws Exception {
+        Path tempDir = Files.createTempDirectory("localcmd-rg-large-output-");
+        try {
+            LocalCommandTool tool = new LocalCommandTool(tempDir);
+            String version = tool.execute("rg --version");
+            Assume.assumeTrue("rg が利用できないためスキップ", version.contains("(tool:cmd)"));
+
+            // 出力バッファ詰まりを再現しやすいように、十分な件数のファイルを生成する。
+            Path filesDir = tempDir.resolve("files");
+            Files.createDirectories(filesDir);
+            for (int i = 0; i < 3000; i++) {
+                Path file = filesDir.resolve("file-" + i + ".txt");
+                Files.writeString(file, "dummy");
+            }
+
+            String result = tool.execute("rg --files .");
+            assertFalse(result, result.contains("コマンドがタイムアウトしました"));
+            assertTrue(result, result.contains("(tool:cmd)"));
+        } finally {
+            cleanupDirectory(tempDir);
+        }
     }
 
     @Test

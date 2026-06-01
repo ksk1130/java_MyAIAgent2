@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.ArrayList;
+import java.io.ByteArrayOutputStream;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -542,6 +544,19 @@ public class LocalCommandTool {
             prependAddonsToPath(pb.environment());
 
             Process process = pb.start();
+            ByteArrayOutputStream outputBuffer = new ByteArrayOutputStream();
+            AtomicReference<IOException> readerError = new AtomicReference<>();
+
+            // 子プロセスの標準出力を逐次読み取り、出力バッファ詰まりを防ぐ。
+            Thread readerThread = new Thread(() -> {
+                try {
+                    process.getInputStream().transferTo(outputBuffer);
+                } catch (IOException e) {
+                    readerError.set(e);
+                }
+            }, "localcmd-output-reader");
+            readerThread.setDaemon(true);
+            readerThread.start();
 
             if (stdin != null && stdin.length > 0) {
                 process.getOutputStream().write(stdin);
@@ -552,12 +567,30 @@ public class LocalCommandTool {
             boolean finished = process.waitFor(commandTimeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroy();
+                if (!process.waitFor(200, TimeUnit.MILLISECONDS)) {
+                    process.destroyForcibly();
+                }
+                try {
+                    readerThread.join(1_000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
                 return new CommandResult(false, 124, "");
             }
 
+            try {
+                readerThread.join(1_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
+            IOException outputReadError = readerError.get();
+            if (outputReadError != null) {
+                return new CommandResult(true, 1, "(error) コマンド出力の読み取りに失敗しました: " + outputReadError.getMessage());
+            }
+
             // 出力を読み込む
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
-                    .stripTrailing();
+            String output = outputBuffer.toString(StandardCharsets.UTF_8).stripTrailing();
             int exitCode = process.exitValue();
             return new CommandResult(true, exitCode, output);
         } catch (InterruptedException e) {
