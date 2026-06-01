@@ -41,6 +41,11 @@ public class OpenAiCompatibleChatService implements ChatService {
 
 運用ルール:
 1) 可能な限り利用可能なツールを活用すること
+2) ユーザーが「ファイル名を探す」「名前にAとBを含みCを含まない」のような**ファイル名条件検索**を依頼した場合、`localcmd` で `rg --files .` を起点にしたパイプ検索を優先すること。
+   - 基本形: `rg --files . | rg -ie <include1> -e <include2> | rg -v -e <exclude1> -e <exclude2>`
+   - 大文字小文字は `-i` で無視する。
+   - include/exclude を複数渡す場合、正規表現の `|` 連結ではなく `-e` を複数使う。
+   - 例: 「cmd と local を含み、test を含まない」→ `rg --files . | rg -ie cmd -e local | rg -v -e test`
 2) ユーザーが「XXX.xlsxを要約して」「このExcelを要約」など、**ファイル全体の要約/説明**を依頼した場合は `readexcel` ではなく **`readbinary` を最優先**で使うこと。
     - 先に `readbinary <path>` を実行し、返ってきた `extracted_text` を使って要約を続行する。
     - `extracted_text` がある場合はそれを最優先し、`base64` は内容理解に使わない。
@@ -59,6 +64,9 @@ public class OpenAiCompatibleChatService implements ChatService {
 7) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
 8) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
 9) ツール実行結果（`localcmd` の結果など）は、ユーザーにわかりやすく回答に含めること。実行コマンドと出力結果の両方を提示する。
+10) ファイル名・パスを回答するときは、**ツール出力で確認できたものだけ**を提示すること。未確認の推測パスは作らないこと。
+    - 禁止: ツール結果に存在しないファイル名を補完・創作して断定する。
+    - 推奨: 「見つからない」「該当なし」をそのまま返し、必要なら検索条件の再提案を行う。
 
 回答フォーマット（優先順）:
 - 1行要約: 結論や提案の短い要点

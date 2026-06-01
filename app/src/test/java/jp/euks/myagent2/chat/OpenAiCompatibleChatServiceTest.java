@@ -68,6 +68,8 @@ public class OpenAiCompatibleChatServiceTest {
         String prompt = service.getSystemPrompt();
         assertNotNull(prompt);
         assertTrue(prompt.length() > 0);
+        assertTrue(prompt, prompt.contains("rg --files . | rg -ie"));
+        assertTrue(prompt, prompt.contains("ツール出力で確認できたものだけ"));
     }
 
     @Test

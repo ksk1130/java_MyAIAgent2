@@ -463,8 +463,8 @@ public class AgentTools {
      * @param command 実行するコマンドライン文字列
      * @return 実行結果（標準出力/エラー）またはエラー文字列
      */
-    @Tool("ローカルコマンド（git, grep, rg, nkf, ls, find, cat, head, tail, wc, stat, diff, sort, uniq, cut, tree, basename, dirname, realpath）を実行する。シェルメタ文字は拒否。nkf の `--overwrite` は利用可。タイムアウト: 既定20秒（最大30秒）、出力上限: 1000行/100KB。")
-    public String localcmd(@P("実行するコマンド（例: git log -10, grep pattern file, nkf --version）") String command) {
+    @Tool("ローカルコマンド（git, grep, rg, nkf, ls, find, cat, head, tail, wc, stat, diff, sort, uniq, cut, tree, basename, dirname, realpath）を実行する。シェルメタ文字は拒否。nkf の `--overwrite` は利用可。タイムアウト: 既定20秒（最大30秒）、出力上限: 1000行/100KB。ファイル名の条件検索は `rg --files . | rg -ie <include1> -e <include2> | rg -v -e <exclude>` 形式を優先。")
+    public String localcmd(@P("実行するコマンド（例: git log -10, grep pattern file, rg --files . | rg -ie cmd -e local | rg -v -e test）") String command) {
         if (Objects.isNull(localCommandTool)) {
             return "(error) localcmdツールが設定されていません";
         }
