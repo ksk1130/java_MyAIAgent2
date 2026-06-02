@@ -16,6 +16,7 @@ import jp.euks.myagent2.chat.*;
 public final class ConversationSession {
     private String sessionId;
     private String title;
+    private boolean titleManuallySet;
     private String createdAt;
     private String updatedAt;
     private List<ChatMessage> messages;
@@ -87,8 +88,33 @@ public final class ConversationSession {
             List<ChatMessage> messages,
             String workingDirectory,
             String transcript) {
+        this(sessionId, title, createdAt, updatedAt, messages, workingDirectory, transcript, false);
+    }
+
+    /**
+     * フルコンストラクタ（タイトル手動更新フラグ付き）。
+     *
+     * @param sessionId        セッション ID
+     * @param title            セッションタイトル
+     * @param createdAt        作成日時
+     * @param updatedAt        更新日時
+     * @param messages         メッセージリスト
+     * @param workingDirectory 作業ディレクトリ
+     * @param transcript       保存済みトランスクリプト文字列（未保存時は null）
+     * @param titleManuallySet タイトルをユーザーが手動設定済みかどうか
+     */
+    public ConversationSession(
+            String sessionId,
+            String title,
+            String createdAt,
+            String updatedAt,
+            List<ChatMessage> messages,
+            String workingDirectory,
+            String transcript,
+            boolean titleManuallySet) {
         this.sessionId = sessionId;
         this.title = title;
+        this.titleManuallySet = titleManuallySet;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.messages = new ArrayList<>(Objects.isNull(messages) ? List.of() : messages);
@@ -119,6 +145,26 @@ public final class ConversationSession {
 
     public String title() {
         return title;
+    }
+
+    /**
+     * セッションタイトルを取得します。
+     *
+     * @return セッションタイトル
+     */
+    public String getTitle() {
+        return title;
+    }
+
+    /**
+     * セッションタイトルを手動で更新します。
+     *
+     * @param newTitle 新しいタイトル
+     */
+    public void setTitle(String newTitle) {
+        String normalized = Objects.isNull(newTitle) ? "" : newTitle.trim();
+        this.title = normalized.isEmpty() ? "New Chat" : normalized;
+        this.titleManuallySet = true;
     }
 
     public String createdAt() {
@@ -171,7 +217,9 @@ public final class ConversationSession {
      */
     public void replaceMessages(List<ChatMessage> newMessages) {
         this.messages = new ArrayList<>(Objects.isNull(newMessages) ? List.of() : newMessages);
-        this.title = inferTitle(this.messages, this.title);
+        if (!titleManuallySet) {
+            this.title = inferTitle(this.messages, this.title);
+        }
     }
 
     /**

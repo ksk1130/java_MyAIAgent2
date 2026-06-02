@@ -493,6 +493,31 @@ public class ChatInteractor {
     }
 
     /**
+     * 指定セッションのタイトルを更新して永続化します。
+     *
+     * @param session  対象セッション
+     * @param newTitle 新しいタイトル
+     */
+    public void changeTitle(ConversationSession session, String newTitle) {
+        if (Objects.isNull(session)) {
+            return;
+        }
+        session.setTitle(newTitle);
+        if (conversationStore != null) {
+            conversationStore.save(session);
+        }
+    }
+
+    /**
+     * 現在のセッションのタイトルを更新して永続化します。
+     *
+     * @param newTitle 新しいタイトル
+     */
+    public void changeCurrentSessionTitle(String newTitle) {
+        changeTitle(currentSession, newTitle);
+    }
+
+    /**
      * ストリーミング中かどうかを返す（evictの判断に使用）。
      */
     public boolean isBusy() {

@@ -27,6 +27,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ListView;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
@@ -376,7 +377,30 @@ public class App extends Application {
                         refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager);
             });
 
-            javafx.scene.control.ContextMenu menu = new javafx.scene.control.ContextMenu(deleteItem);
+            javafx.scene.control.MenuItem changeTitleItem = new javafx.scene.control.MenuItem("タイトルを変更");
+            changeTitleItem.setOnAction(ev -> {
+                SessionSummary selected = cell.getItem();
+                if (Objects.isNull(selected)) {
+                    return;
+                }
+
+                TextInputDialog dialog = new TextInputDialog(selected.title());
+                dialog.setTitle("タイトル変更");
+                dialog.setHeaderText("新しいタイトルを入力してください");
+                dialog.setContentText("タイトル:");
+                dialog.showAndWait().ifPresent(newTitle -> {
+                    SessionRuntime runtime = runtimeManager.getOrCreate(selected.sessionId());
+                    if (Objects.isNull(runtime) || Objects.isNull(runtime.getInteractor())) {
+                        return;
+                    }
+                    runtime.getInteractor().changeCurrentSessionTitle(newTitle);
+                    if (refreshSessionsRef[0] != null) {
+                        refreshSessionsRef[0].run();
+                    }
+                });
+            });
+
+            javafx.scene.control.ContextMenu menu = new javafx.scene.control.ContextMenu(changeTitleItem, deleteItem);
             cell.setContextMenu(menu);
             return cell;
         });

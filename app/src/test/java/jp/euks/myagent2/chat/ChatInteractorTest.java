@@ -200,6 +200,22 @@ public class ChatInteractorTest {
     }
 
     @Test
+    public void changeCurrentSessionTitlePersistsAndKeepsManualTitle() {
+        FakeConversationStore store = new FakeConversationStore();
+        ChatInteractor interactor = new ChatInteractor(
+            message -> "ok:" + message,
+            message -> java.util.Optional.empty(),
+            store);
+
+        interactor.changeCurrentSessionTitle("手動タイトル");
+        interactor.onUserMessage("hello");
+
+        assertFalse(store.savedSessions.isEmpty());
+        ConversationSession saved = store.savedSessions.get(store.savedSessions.size() - 1);
+        assertEquals("手動タイトル", saved.title());
+    }
+
+    @Test
     public void onUserMessageSyncsWorkingDirectoryWhenSetdirSucceeded() {
         java.util.concurrent.atomic.AtomicReference<java.nio.file.Path> captured = new java.util.concurrent.atomic.AtomicReference<>();
         ChatService service = new ChatService() {
