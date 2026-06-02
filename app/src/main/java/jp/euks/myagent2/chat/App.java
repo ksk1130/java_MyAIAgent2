@@ -634,6 +634,14 @@ public class App extends Application {
                                                                 el.innerHTML = marked.parse(el.getAttribute('data-md'));
                                                             });
                                                         }
+
+                                                        // 描画後に最下部へ移動し、最新メッセージを見える位置にする。
+                                                        function scrollToBottom() {
+                                                            window.scrollTo(0, document.body.scrollHeight);
+                                                        }
+                                                        requestAnimationFrame(scrollToBottom);
+                                                        setTimeout(scrollToBottom, 0);
+                                                        setTimeout(scrollToBottom, 50);
                                                     </script>
                                                 </body>
                                                 </html>
