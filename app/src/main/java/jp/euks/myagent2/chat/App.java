@@ -37,6 +37,8 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
 import javafx.stage.Stage;
 import javafx.stage.DirectoryChooser;
 import javafx.scene.web.WebView;
@@ -308,6 +310,9 @@ public class App extends Application {
         root.setCenter(splitPane);
 
         Scene scene = new Scene(root, 920, 560);
+        scene.getAccelerators().put(
+            new KeyCodeCombination(KeyCode.D, KeyCombination.ALT_DOWN),
+            deleteChatButton::fire);
         stage.setTitle(APP_NAME);
         stage.setScene(scene);
         stage.show();
