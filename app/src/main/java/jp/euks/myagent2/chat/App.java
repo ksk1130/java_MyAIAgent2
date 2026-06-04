@@ -75,8 +75,10 @@ public class App extends Application {
      * @param stage メインステージ
      */
     public void start(Stage stage) {
+        // 作業ディレクトリを取得して会話ストアを初期化
         Path workDir = Path.of(System.getProperty("user.dir"));
         ConversationStore conversationStore = new JsonConversationStore(workDir);
+
         // SessionRuntimeManager を作成してセッション単位のインスタンス化を管理
         SessionRuntimeManager runtimeManager = new SessionRuntimeManager(5, conversationStore, workDir);
 
@@ -85,13 +87,18 @@ public class App extends Application {
         SessionRuntime initialRuntime = runtimeManager.getOrCreate(initial.sessionId());
         AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(initialRuntime.getInteractor());
 
+        // UI コンポーネントの構築
+
+        // 会話履歴のプレビュー表示用 WebView を構築
         WebView webView = new WebView();
         WebEngine webEngine = webView.getEngine();
         updateWebPreview(webEngine, interactorRef.get().getTranscript());
 
+        // セッションリストを構築
         ListView<SessionSummary> sessionList = new ListView<>();
         sessionList.setPrefWidth(220);
 
+        // セッションリストを最新化する Runnable を生成。セッション切替やメッセージ送受信の完了後に呼び出して UI を最新化するために保持しておく。
         Runnable[] refreshSessionsRef = new Runnable[1];
         refreshSessionsRef[0] = createRefreshSessionsRunnable(sessionList, conversationStore, interactorRef);
 
@@ -113,6 +120,7 @@ public class App extends Application {
         });
         deleteChatButton.disableProperty().bind(sessionList.getSelectionModel().selectedItemProperty().isNull());
 
+        // セッションリストの選択変更でセッション切替処理を呼び出す
         sessionList.getSelectionModel().selectedItemProperty().addListener((obs, oldValue, newValue) -> {
             if (Objects.isNull(newValue)) {
                 return;
@@ -144,6 +152,7 @@ public class App extends Application {
         inputField.setPrefRowCount(3);
         inputField.setMaxHeight(120);
         HBox.setHgrow(inputField, Priority.ALWAYS);
+
         // ベースディレクトリ表示と変更ボタン（送信アクションからも更新できるようここで生成）
         baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
         Label progressLabel = new Label();
@@ -174,6 +183,8 @@ public class App extends Application {
             }
             cancelButton.setDisable(true);
         });
+
+        // 送信アクションを Runnable として切り出す。これを送信ボタンのアクションと Ctrl+Enter の両方から呼び出す。
         Runnable sendAction = () -> {
             String userInput = inputField.getText().trim();
             if (userInput.isEmpty()) {
@@ -203,8 +214,8 @@ public class App extends Application {
                             refreshSessionsRef[0].run();
                             // 作業ディレクトリ表示を最新化（JSON が源泉）
                             baseDirLabel.setText("作業ディレクトリ: " + activeInteractor.getWorkingDirectory().toString());
-                            restoreIdleUiState(inputField, sendButton, cancelButton, progressLabel, newChatButton,
-                                    deleteChatButton, sessionList);
+                            completeMessageHandling(inputField, sendButton, cancelButton, progressLabel, newChatButton,
+                                    deleteChatButton, sessionList, null);
                         }),
                         error -> Platform.runLater(() -> {
                             Alert alert = new Alert(Alert.AlertType.ERROR);
@@ -212,8 +223,8 @@ public class App extends Application {
                             alert.setHeaderText("応答中にエラーが発生しました");
                             alert.setContentText(error.getMessage());
                             alert.showAndWait();
-                            restoreIdleUiState(inputField, sendButton, cancelButton, progressLabel, newChatButton,
-                                    deleteChatButton, sessionList);
+                            completeMessageHandling(inputField, sendButton, cancelButton, progressLabel, newChatButton,
+                                    deleteChatButton, sessionList, null);
                         }));
             });
         };
@@ -288,7 +299,20 @@ public class App extends Application {
             dialog.showAndWait().ifPresent(text -> interactorRef.get().setSystemPrompt(text));
         });
 
-        HBox topBar = new HBox(8, toggleHistoryButton, sysPromptButton);
+        Button clearButton = new Button("クリア");
+        clearButton.setOnAction(event -> {
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("会話履歴をクリア");
+            confirm.setHeaderText("会話履歴を削除してもよろしいですか？");
+            confirm.setContentText("この操作は取り消せません。");
+
+            if (confirm.showAndWait().orElse(ButtonType.CANCEL) == ButtonType.OK) {
+                inputField.setText("/clear");
+                sendAction.run();
+            }
+        });
+
+        HBox topBar = new HBox(8, toggleHistoryButton, sysPromptButton, clearButton);
 
         // 全コピーボタン：現在の会話履歴をクリップボードにコピー
         Button copyAllButton = new Button("全コピー");
@@ -311,8 +335,8 @@ public class App extends Application {
 
         Scene scene = new Scene(root, 920, 560);
         scene.getAccelerators().put(
-            new KeyCodeCombination(KeyCode.D, KeyCombination.ALT_DOWN),
-            deleteChatButton::fire);
+                new KeyCodeCombination(KeyCode.D, KeyCombination.ALT_DOWN),
+                deleteChatButton::fire);
         stage.setTitle(APP_NAME);
         stage.setScene(scene);
         stage.show();
@@ -442,6 +466,31 @@ public class App extends Application {
     }
 
     /**
+     * メッセージ処理完了後の共通 UI 状態復帰処理。
+     * 
+     * @param inputField       入力欄の TextArea
+     * @param sendButton       送信ボタン
+     * @param cancelButton     キャンセルボタン
+     * @param progressLabel    進捗表示用の Label
+     * @param newChatButton    新規チャットボタン
+     * @param deleteChatButton チャット削除ボタン
+     * @param sessionList      セッションリストの ListView（削除ボタンの再バインドに使用）
+     * @param unused           未使用（互換性のため）
+     */
+    private void completeMessageHandling(
+            TextArea inputField,
+            Button sendButton,
+            Button cancelButton,
+            Label progressLabel,
+            Button newChatButton,
+            Button deleteChatButton,
+            ListView<SessionSummary> sessionList,
+            Void unused) {
+        restoreIdleUiState(inputField, sendButton, cancelButton, progressLabel, newChatButton,
+                deleteChatButton, sessionList);
+    }
+
+    /**
      * UI をアイドル状態に戻すユーティリティ。入力欄を有効化し、送信ボタンを「送信」に戻すなど。
      * 
      * @param inputField       入力欄の TextArea
@@ -506,12 +555,7 @@ public class App extends Application {
         updateWebPreview(webEngine, selectedInteractor.getTranscript());
         baseDirLabel.setText("作業ディレクトリ: " + selectedInteractor.getWorkingDirectory().toString());
 
-        if (refreshSessions != null) {
-            try {
-                refreshSessions.run();
-            } catch (Exception ignored) {
-            }
-        }
+        safelyRunRefreshSessions(refreshSessions);
     }
 
     /**
@@ -561,6 +605,15 @@ public class App extends Application {
             switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId());
         }
 
+        safelyRunRefreshSessions(refreshSessions);
+    }
+
+    /**
+     * refreshSessions を null チェックと例外処理を行いながら安全に実行するヘルパー。
+     * 
+     * @param refreshSessions 実行する Runnable（null 可）
+     */
+    private void safelyRunRefreshSessions(Runnable refreshSessions) {
         if (refreshSessions != null) {
             try {
                 refreshSessions.run();
@@ -685,7 +738,8 @@ public class App extends Application {
         String toolName = "tool";
 
         for (String line : lines) {
-            if (isToolBlockBeginLine(line)) {
+            String normalized = stripChatLabelPrefix(line);
+            if (isToolBlockBeginLine(normalized)) {
                 if (!"NONE".equals(currentRole) && currentContent.length() > 0) {
                     flushBlock(html, currentRole, currentContent.toString());
                     currentContent.setLength(0);
@@ -696,7 +750,7 @@ public class App extends Application {
                 toolContent.setLength(0);
                 continue;
             }
-            if (isToolBlockEndLine(line)) {
+            if (isToolBlockEndLine(normalized)) {
                 appendToolBlockHtml(html, toolName, toolContent.toString());
                 inToolBlock = false;
                 toolContent.setLength(0);
@@ -704,7 +758,6 @@ public class App extends Application {
                 continue;
             }
             if (inToolBlock) {
-                String normalized = stripChatLabelPrefix(line);
                 if (toolContent.length() > 0) {
                     toolContent.append("\n");
                 }
@@ -765,28 +818,9 @@ public class App extends Application {
             html.append("<div class='msg-row'>")
                     .append("<span class='label-assistant'>Assistant:</span>")
                     .append("<div class='md-content' data-md='")
-                    .append(escapeHtmlAttr(content))
+                    .append(escapeHtml(content))
                     .append("'></div></div>\n");
         }
-    }
-
-    /**
-     * HTML 属性値として安全な文字列にエスケープするユーティリティ。`&`, `<`, `>`, `"`, `'` をそれぞれ対応する HTML
-     * エンティティに置換する。
-     * 
-     * @param text エスケープ対象の文字列
-     * @return HTML 属性値として安全な文字列。入力が null の場合は空文字列を返す。
-     */
-    private static String escapeHtmlAttr(String text) {
-        if (Objects.isNull(text)) {
-            return "";
-        }
-        return text
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
     }
 
     /**
@@ -805,22 +839,50 @@ public class App extends Application {
                 .append("</pre></details>");
     }
 
-    private static boolean isToolBlockBeginLine(String line) {
-        return normalizeToolLine(line).equals(TOOL_RESULTS_BEGIN_MARKER);
+    /**
+     * ツール出力ブロックの開始行かどうかを判定するユーティリティ。`Assistant: (tool:toolName)` または `Assistant:
+     * (tool:toolName) result`
+     * 
+     * @param normalized 正規化済みの行（"Assistant: " プレフィックス削除済み）
+     * @return 行がツール出力ブロックの開始行であれば true、そうでなければ false
+     */
+    private static boolean isToolBlockBeginLine(String normalized) {
+        return normalized.equals(TOOL_RESULTS_BEGIN_MARKER);
     }
 
-    private static boolean isToolBlockEndLine(String line) {
-        return normalizeToolLine(line).equals(TOOL_RESULTS_END_MARKER);
+    /**
+     * ツール出力ブロックの終了行かどうかを判定するユーティリティ。`Assistant: (tool:toolName) end` または
+     * `Assistant: (tool:toolName) result end`
+     * 
+     * @param normalized 正規化済みの行（"Assistant: " プレフィックス削除済み）
+     * @return 行がツール出力ブロックの終了行であれば true、そうでなければ false
+     */
+    private static boolean isToolBlockEndLine(String normalized) {
+        return normalized.equals(TOOL_RESULTS_END_MARKER);
     }
 
+    /**
+     * ツールの結果行かどうかを判定するユーティリティ。`(tool:toolName) result` で始まる行、または `toolName: result`
+     * で始まる行。
+     * 
+     * @param line 判定対象の行
+     * @return 行がツールの結果行であれば true、そうでな
+     */
     private static boolean isToolResultLine(String line) {
-        String normalized = normalizeToolLine(line);
+        String normalized = stripChatLabelPrefix(line);
         return normalized.matches("^\\(tool:\\w+\\).*")
                 || normalized.matches("^[^\\p{L}\\p{N}\\s(]\\s*\\w+:.*");
     }
 
+    /**
+     * ツールの結果行からツール名を抽出するユーティリティ。`(tool:toolName) result` 形式、または `toolName: result`
+     * 形式の両方に対応。
+     * 
+     * @param line ツールの結果行
+     * @return 抽出されたツール名。抽出できない場合は "tool" を返す。
+     */
     private static String extractToolName(String line) {
-        String normalized = normalizeToolLine(line);
+        String normalized = stripChatLabelPrefix(line);
 
         Matcher m1 = TOOL_NAME_PATTERN_1.matcher(normalized);
         if (m1.find()) {
@@ -833,13 +895,13 @@ public class App extends Application {
         return "tool";
     }
 
-    private static String normalizeToolLine(String line) {
-        if (Objects.isNull(line)) {
-            return "";
-        }
-        return line.replaceFirst("^Assistant:\\s+", "");
-    }
-
+    /**
+     * チャットの発言行から "You: " または "Assistant: " のプレフィックスを削除するユーティリティ。入力が null
+     * の場合は空文字列を返す。
+     * 
+     * @param line 正規化対象の行
+     * @return "You: " または "Assistant: " のプレフィックスが削除された行。入力が null の場合は空文字列を返す。
+     */
     private static String stripChatLabelPrefix(String line) {
         if (Objects.isNull(line)) {
             return "";
@@ -847,6 +909,13 @@ public class App extends Application {
         return line.replaceFirst("^(You|Assistant):\\s+", "");
     }
 
+    /**
+     * HTML の特殊文字をエスケープするユーティリティ。`&`, `<`, `>`, `"`, `'` をそれぞれ対応する HTML
+     * エンティティに置換する。
+     * 
+     * @param text エスケープ対象の文字列
+     * @return エスケープ後の文字列。入力が null の場合は空文字列を返す。
+     */
     private static String escapeHtml(String text) {
         if (Objects.isNull(text)) {
             return "";
@@ -854,6 +923,8 @@ public class App extends Application {
         return text
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
-                .replace(">", "&gt;");
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }
