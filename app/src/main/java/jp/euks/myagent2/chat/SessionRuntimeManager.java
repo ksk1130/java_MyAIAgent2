@@ -2,6 +2,7 @@ package jp.euks.myagent2.chat;
 
 import java.util.Objects;
 import jp.euks.myagent2.session.ConversationStore;
+import jp.euks.myagent2.session.ConversationSession;
 import jp.euks.myagent2.tools.DefaultManualToolExecutor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -33,9 +34,10 @@ public class SessionRuntimeManager {
 
     /**
      * 指定したセッションIDの SessionRuntime を取得します。存在しない場合は新規作成します。
+     * セッションに保存されたプロバイダーがあれば、それを使用してChatServiceを生成します。
      * 
      * @param sessionId セッションID
-     * @return SessionRuntime インスタンス。sessionId が null または空白の場合
+     * @return SessionRuntime インスタンス。sessionId が null または空白の場合は null
      */
     public synchronized SessionRuntime getOrCreate(String sessionId) {
         if (sessionId == null || sessionId.isBlank()) {
@@ -47,8 +49,10 @@ public class SessionRuntimeManager {
             return rt;
         }
 
-        // 新規生成: ChatService はファクトリ経由で作る
-        ChatService svc = ChatServiceFactory.createForSession(baseWorkDir);
+        // 新規生成: セッションのプロバイダーを使ってChatServiceを生成する
+        ConversationSession session = conversationStore.loadByIdOrCreate(sessionId);
+        String provider = (session != null) ? session.provider() : "";
+        ChatService svc = ChatServiceFactory.createForSessionWithProvider(baseWorkDir, provider);
         ChatInteractor interactor = new ChatInteractor(svc, new DefaultManualToolExecutor(), conversationStore,
                 sessionId);
         rt = new SessionRuntime(sessionId, svc, interactor);

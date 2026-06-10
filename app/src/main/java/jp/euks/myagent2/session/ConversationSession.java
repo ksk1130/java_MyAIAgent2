@@ -23,12 +23,14 @@ public final class ConversationSession {
     private String workingDirectory;
     /** トランスクリプト文字列（ツール結果マーカーを含む）。JSON に永続化する。 */
     private String transcript;
+    /** このセッションで使用するプロバイダー（"openai" または "gemini"、未設定時は既定値を使用）。 */
+    private String provider;
 
     /**
      * デフォルトコンストラクタ（シリアライズ用）。
      */
     ConversationSession() {
-        this("", "", "", "", new ArrayList<>(), "", null);
+        this("", "", "", "", new ArrayList<>(), "", null, false, "");
     }
 
     /**
@@ -92,6 +94,40 @@ public final class ConversationSession {
     }
 
     /**
+     * フルコンストラクタ（タイトル手動更新フラグ・プロバイダー付き）。
+     *
+     * @param sessionId        セッション ID
+     * @param title            セッションタイトル
+     * @param createdAt        作成日時
+     * @param updatedAt        更新日時
+     * @param messages         メッセージリスト
+     * @param workingDirectory 作業ディレクトリ
+     * @param transcript       保存済みトランスクリプト文字列（未保存時は null）
+     * @param titleManuallySet タイトルをユーザーが手動設定済みかどうか
+     * @param provider         このセッションで使用するプロバイダー（"openai" または "gemini"、未設定時は ""）
+     */
+    public ConversationSession(
+            String sessionId,
+            String title,
+            String createdAt,
+            String updatedAt,
+            List<ChatMessage> messages,
+            String workingDirectory,
+            String transcript,
+            boolean titleManuallySet,
+            String provider) {
+        this.sessionId = sessionId;
+        this.title = title;
+        this.titleManuallySet = titleManuallySet;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+        this.messages = new ArrayList<>(Objects.isNull(messages) ? List.of() : messages);
+        this.workingDirectory = Objects.isNull(workingDirectory) ? "" : workingDirectory;
+        this.transcript = transcript;
+        this.provider = Objects.isNull(provider) ? "" : provider;
+    }
+
+    /**
      * フルコンストラクタ（タイトル手動更新フラグ付き）。
      *
      * @param sessionId        セッション ID
@@ -112,14 +148,7 @@ public final class ConversationSession {
             String workingDirectory,
             String transcript,
             boolean titleManuallySet) {
-        this.sessionId = sessionId;
-        this.title = title;
-        this.titleManuallySet = titleManuallySet;
-        this.createdAt = createdAt;
-        this.updatedAt = updatedAt;
-        this.messages = new ArrayList<>(Objects.isNull(messages) ? List.of() : messages);
-        this.workingDirectory = Objects.isNull(workingDirectory) ? "" : workingDirectory;
-        this.transcript = transcript;
+        this(sessionId, title, createdAt, updatedAt, messages, workingDirectory, transcript, titleManuallySet, "");
     }
 
     /**
@@ -208,6 +237,24 @@ public final class ConversationSession {
      */
     public void setTranscript(String transcript) {
         this.transcript = transcript;
+    }
+
+    /**
+     * このセッションで使用するプロバイダーを取得します。
+     *
+     * @return プロバイダー（"openai" または "gemini"、未設定時は空文字）
+     */
+    public String provider() {
+        return Objects.isNull(provider) ? "" : provider;
+    }
+
+    /**
+     * このセッションで使用するプロバイダーを設定します。
+     *
+     * @param provider 新しいプロバイダー（"openai" または "gemini"）
+     */
+    public void setProvider(String provider) {
+        this.provider = Objects.isNull(provider) ? "" : provider;
     }
 
     /**

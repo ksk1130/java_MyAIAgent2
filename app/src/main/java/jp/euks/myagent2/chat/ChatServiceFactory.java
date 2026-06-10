@@ -16,45 +16,152 @@ import java.util.Map;
  * `createFromEnv` メソッドも提供します。
  */
 public final class ChatServiceFactory {
+    static final String ENV_API_KEY_OPENAI = "MYAGENT2_API_KEY_OPENAI";
+    static final String ENV_API_KEY_GEMINI = "MYAGENT2_API_KEY_GEMINI";
+    static final String ENV_BASE_URL_OPENAI = "MYAGENT2_BASE_URL_OPENAI";
+    static final String ENV_BASE_URL_GEMINI = "MYAGENT2_BASE_URL_GEMINI";
+    // 後方互換性のため、これらは保持するがドキュメントでは非推奨とする
     static final String ENV_API_KEY = "MYAGENT2_API_KEY";
     static final String ENV_BASE_URL = "MYAGENT2_BASE_URL";
     static final String ENV_MODEL = "MYAGENT2_MODEL";
 
-    private static final String DEFAULT_BASE_URL = "https://api.openai.com/v1";
-    private static final String DEFAULT_MODEL = "gpt-4o-mini";
+    private static final String DEFAULT_BASE_URL_OPENAI = "https://api.openai.com/v1";
+    private static final String DEFAULT_BASE_URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta";
+    private static final String PROVIDER_OPENAI = "openai";
+    private static final String PROVIDER_GEMINI = "gemini";
 
     private ChatServiceFactory() {
     }
 
     /**
      * 環境変数に基づいて既定の ChatService 実装を生成する。
-     * API キーが設定されていれば `OpenAiCompatibleChatService` を、なければ `StubChatService` を返す。
-     *
+     * 設定済みの最初のプロバイダーを使用する。
+     * 
      * @return ChatService 実装
      */
     public static ChatService createDefault() {
-        return createFromEnv(System.getenv());
+        Path workDir = Path.of(System.getProperty("user.dir"));
+        return createForSessionWithProvider(workDir, null);
     }
 
     /**
-     * テスト可能性のため環境マップからサービスを生成する内部メソッド。
-     *
-     * @param env 環境変数のマップ
+     * 指定した作業ディレクトリとプロバイダーを使ってセッション用の ChatService を生成する。
+     * プロバイダーが null または空の場合は、最初に設定されているプロバイダーを使用する。
+     * 
+     * @param workDir    ツールがアクセスする作業ディレクトリ
+     * @param provider   セッション固有のプロバイダー（"openai" または "gemini"、null / 空なら最初に設定されているもの）
      * @return ChatService 実装
      */
-    static ChatService createFromEnv(Map<String, String> env) {
-        Path workDir = Path.of(System.getProperty("user.dir"));
-        return createFromEnvWithWorkDir(env, workDir);
+    public static ChatService createForSessionWithProvider(Path workDir, String provider) {
+        Path resolvedWorkDir = (Objects.isNull(workDir)) ? Path.of(System.getProperty("user.dir")) : workDir;
+        Map<String, String> env = System.getenv();
+
+        String resolvedProvider = trimToEmpty(provider);
+        if (resolvedProvider.isEmpty()) {
+            resolvedProvider = getFirstAvailableProvider();
+        }
+
+        if (PROVIDER_OPENAI.equals(resolvedProvider)) {
+            return createOpenAiService(env, resolvedWorkDir);
+        } else if (PROVIDER_GEMINI.equals(resolvedProvider)) {
+            return createGeminiService(env, resolvedWorkDir);
+        }
+
+        return new StubChatService();
     }
 
     /**
-     * 指定した作業ディレクトリを使ってセッション用の ChatService を生成する。
-     * 環境変数は実行環境の値を使用する。
+     * 設定済みのプロバイダーを取得します。OpenAI が優先、次に Gemini。
+     * 
+     * @return "openai" または "gemini" または ""
      */
-    public static ChatService createForSession(Path workDir) {
-        Path resolvedWorkDir = (Objects.isNull(workDir)) ? Path.of(System.getProperty("user.dir")) : workDir;
+    static String getFirstAvailableProvider() {
+        Map<String, String> env = System.getenv();
+        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty() &&
+            !trimToEmpty(env.get(ENV_BASE_URL_OPENAI)).isEmpty()) {
+            return PROVIDER_OPENAI;
+        }
+        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty() &&
+            !trimToEmpty(env.get(ENV_BASE_URL_GEMINI)).isEmpty()) {
+            return PROVIDER_GEMINI;
+        }
+        return "";
+    }
 
-        return createFromEnvWithWorkDir(System.getenv(), resolvedWorkDir);
+    /**
+     * 設定済みのプロバイダーのリストを返します。
+     * 
+     * @return ["openai", "gemini"] のサブセット
+     */
+    static java.util.List<String> getAvailableProviders() {
+        java.util.List<String> providers = new java.util.ArrayList<>();
+        Map<String, String> env = System.getenv();
+        
+        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty() &&
+            !trimToEmpty(env.get(ENV_BASE_URL_OPENAI)).isEmpty()) {
+            providers.add(PROVIDER_OPENAI);
+        }
+        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty() &&
+            !trimToEmpty(env.get(ENV_BASE_URL_GEMINI)).isEmpty()) {
+            providers.add(PROVIDER_GEMINI);
+        }
+        
+        return providers;
+    }
+
+    /**
+     * OpenAI 用の ChatService を生成します。
+     */
+    private static ChatService createOpenAiService(Map<String, String> env, Path workDir) {
+        String apiKey = trimToEmpty(env.get(ENV_API_KEY_OPENAI));
+        if (apiKey.isEmpty()) {
+            return new StubChatService();
+        }
+
+        String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_OPENAI));
+        if (baseUrl.isEmpty()) {
+            baseUrl = DEFAULT_BASE_URL_OPENAI;
+        }
+        baseUrl = normalizeBaseUrl(baseUrl);
+
+        return new OpenAiCompatibleChatService(
+                baseUrl,
+                apiKey,
+                "gpt-4o-mini",
+                new WorkspaceGrepTool(workDir),
+                new GitLogTool(workDir),
+                new FileReaderTool(workDir),
+                new FileWriterTool(workDir),
+                new LocalCommandTool(workDir));
+    }
+
+    /**
+     * Gemini 用の ChatService を生成します。
+     */
+    private static ChatService createGeminiService(Map<String, String> env, Path workDir) {
+        String apiKey = trimToEmpty(env.get(ENV_API_KEY_GEMINI));
+        if (apiKey.isEmpty()) {
+            return new StubChatService();
+        }
+
+        String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_GEMINI));
+        if (baseUrl.isEmpty()) {
+            baseUrl = DEFAULT_BASE_URL_GEMINI;
+        }
+        baseUrl = normalizeBaseUrl(baseUrl);
+        
+        // Gemini プロキシ処理
+        EndpointAuth endpointAuth = resolveEndpoint(baseUrl, apiKey);
+
+        return new OpenAiCompatibleChatService(
+                endpointAuth.baseUrl(),
+                endpointAuth.apiKey(),
+                "gemini-2.0-flash",
+                new WorkspaceGrepTool(workDir),
+                new GitLogTool(workDir),
+                new FileReaderTool(workDir),
+                new FileWriterTool(workDir),
+                new LocalCommandTool(workDir));
     }
 
     /**
@@ -65,21 +172,21 @@ public final class ChatServiceFactory {
      * @return ChatService 実装
      */
     private static ChatService createFromEnvWithWorkDir(Map<String, String> env, Path workDir) {
+        // This method is now replaced by createForSessionWithProvider
+        // Kept for backward compatibility during testing
         String apiKey = trimToEmpty(env.get(ENV_API_KEY));
         if (apiKey.isEmpty()) {
             return new StubChatService();
         }
 
-        String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL));
-        String model = trimToEmpty(env.getOrDefault(ENV_MODEL, DEFAULT_MODEL));
-        String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL : baseUrl);
-        String resolvedModel = model.isEmpty() ? DEFAULT_MODEL : model;
+        String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL_OPENAI));
+        String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL_OPENAI : baseUrl);
         EndpointAuth endpointAuth = resolveEndpoint(normalizedBaseUrl, apiKey);
 
         return new OpenAiCompatibleChatService(
                 endpointAuth.baseUrl(),
                 endpointAuth.apiKey(),
-                resolvedModel,
+                "gpt-4o-mini",
                 new WorkspaceGrepTool(workDir),
                 new GitLogTool(workDir),
                 new FileReaderTool(workDir),

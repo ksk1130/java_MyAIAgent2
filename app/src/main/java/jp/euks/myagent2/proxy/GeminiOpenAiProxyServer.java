@@ -150,6 +150,12 @@ public final class GeminiOpenAiProxyServer {
     }
 
     private String buildGeminiGenerateContentUrl(String model) {
+        // MYAGENT2_BASE_URL_GEMINI が既に完全なエンドポイント URL を含む場合はそのまま使用
+        if (geminiBaseUrl.contains(":generateContent")) {
+            return geminiBaseUrl;
+        }
+        
+        // ベース URL のみの場合はモデル名を付加する（後方互換性）
         String encodedModel = URLEncoder.encode(model, StandardCharsets.UTF_8).replace("+", "%20");
         return geminiBaseUrl + "/models/%s:generateContent".formatted(encodedModel);
     }

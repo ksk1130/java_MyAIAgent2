@@ -82,17 +82,17 @@ public class App extends Application {
         // SessionRuntimeManager を作成してセッション単位のインスタンス化を管理
         SessionRuntimeManager runtimeManager = new SessionRuntimeManager(5, conversationStore, workDir);
 
-        // 起動時は新規セッションから開始（既存ロジックを維持）
-        ConversationSession initial = conversationStore.createNewSession(workDir.toString());
-        SessionRuntime initialRuntime = runtimeManager.getOrCreate(initial.sessionId());
-        AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(initialRuntime.getInteractor());
+        // 起動時はセッションなしで開始
+        AtomicReference<ChatInteractor> interactorRef = new AtomicReference<>(null);
 
         // UI コンポーネントの構築
 
         // 会話履歴のプレビュー表示用 WebView を構築
         WebView webView = new WebView();
         WebEngine webEngine = webView.getEngine();
-        updateWebPreview(webEngine, interactorRef.get().getTranscript());
+        if (interactorRef.get() != null) {
+            updateWebPreview(webEngine, interactorRef.get().getTranscript(), null);
+        }
 
         // セッションリストを構築
         ListView<SessionSummary> sessionList = new ListView<>();
@@ -104,12 +104,22 @@ public class App extends Application {
 
         // 作業ディレクトリ表示ラベルを先に用意しておく（セッション切替時に更新するため）
         Label baseDirLabel = new Label();
+        if (interactorRef.get() != null) {
+            baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
+        } else {
+            baseDirLabel.setText("作業ディレクトリ: " + workDir.toString());
+        }
 
         Button newChatButton = new Button("+ 新規");
         newChatButton.setOnAction(event -> {
-            ConversationSession created = conversationStore.createNewSession(workDir.toString());
-            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel,
-                    created.sessionId());
+            String selectedProvider = showProviderSelectionDialog();
+            if (selectedProvider != null) {
+                ConversationSession created = conversationStore.createNewSession(workDir.toString());
+                created.setProvider(selectedProvider);
+                conversationStore.save(created);
+                switchToSession(runtimeManager, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel,
+                        created.sessionId(), conversationStore);
+            }
         });
 
         Button deleteChatButton = new Button("削除");
@@ -125,11 +135,12 @@ public class App extends Application {
             if (Objects.isNull(newValue)) {
                 return;
             }
-            if (newValue.sessionId().equals(interactorRef.get().getCurrentSessionId())) {
+            ChatInteractor current = interactorRef.get();
+            if (current != null && newValue.sessionId().equals(current.getCurrentSessionId())) {
                 return;
             }
             switchToSession(runtimeManager, interactorRef, webEngine, refreshSessionsRef[0], baseDirLabel,
-                    newValue.sessionId());
+                    newValue.sessionId(), conversationStore);
         });
 
         refreshSessionsRef[0].run();
@@ -154,7 +165,6 @@ public class App extends Application {
         HBox.setHgrow(inputField, Priority.ALWAYS);
 
         // ベースディレクトリ表示と変更ボタン（送信アクションからも更新できるようここで生成）
-        baseDirLabel.setText("作業ディレクトリ: " + interactorRef.get().getWorkingDirectory().toString());
         Label progressLabel = new Label();
         progressLabel.setStyle("-fx-text-fill: #FF6600;");
         progressLabel.setVisible(false);
@@ -192,6 +202,9 @@ public class App extends Application {
             }
 
             ChatInteractor activeInteractor = interactorRef.get();
+            if (activeInteractor == null) {
+                return; // セッション未選択の場合は何もしない
+            }
 
             inputField.clear();
             setSendingUiState(inputField, sendButton, cancelButton, progressLabel, newChatButton, deleteChatButton);
@@ -207,9 +220,16 @@ public class App extends Application {
                         () -> Platform.runLater(() -> {
                             // 完了時: WebViewを再描画
                             if (interactorRef.get() == activeInteractor) {
-                                updateWebPreview(webEngine, activeInteractor.getTranscript());
+                                String sessionId = activeInteractor.getCurrentSessionId();
+                                ConversationSession sess = conversationStore.loadByIdOrCreate(sessionId);
+                                updateWebPreview(webEngine, activeInteractor.getTranscript(), sess.provider());
                             } else {
-                                updateWebPreview(webEngine, interactorRef.get().getTranscript());
+                                ChatInteractor current = interactorRef.get();
+                                if (current != null) {
+                                    String sessionId = current.getCurrentSessionId();
+                                    ConversationSession sess = conversationStore.loadByIdOrCreate(sessionId);
+                                    updateWebPreview(webEngine, current.getTranscript(), sess.provider());
+                                }
                             }
                             refreshSessionsRef[0].run();
                             // 作業ディレクトリ表示を最新化（JSON が源泉）
@@ -268,6 +288,11 @@ public class App extends Application {
 
         Button sysPromptButton = new Button("システムプロンプト");
         sysPromptButton.setOnAction(event -> {
+            ChatInteractor activeInteractor = interactorRef.get();
+            if (activeInteractor == null) {
+                return;
+            }
+
             Dialog<String> dialog = new Dialog<>();
             dialog.setTitle("システムプロンプト");
             dialog.setHeaderText("システムプロンプトを編集してください");
@@ -275,7 +300,7 @@ public class App extends Application {
             ButtonType saveButtonType = new ButtonType("保存", ButtonBar.ButtonData.OK_DONE);
             dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
 
-            TextArea sysPromptArea = new TextArea(interactorRef.get().getSystemPrompt());
+            TextArea sysPromptArea = new TextArea(activeInteractor.getSystemPrompt());
             sysPromptArea.setWrapText(true);
             sysPromptArea.setPrefRowCount(8);
 
@@ -296,7 +321,12 @@ public class App extends Application {
             });
 
             dialog.setResultConverter(bt -> bt == saveButtonType ? sysPromptArea.getText() : null);
-            dialog.showAndWait().ifPresent(text -> interactorRef.get().setSystemPrompt(text));
+            dialog.showAndWait().ifPresent(text -> {
+                ChatInteractor interactor = interactorRef.get();
+                if (interactor != null) {
+                    interactor.setSystemPrompt(text);
+                }
+            });
         });
 
         Button clearButton = new Button("クリア");
@@ -317,9 +347,12 @@ public class App extends Application {
         // 全コピーボタン：現在の会話履歴をクリップボードにコピー
         Button copyAllButton = new Button("全コピー");
         copyAllButton.setOnAction(event -> {
-            ClipboardContent content = new ClipboardContent();
-            content.putString(interactorRef.get().getTranscript());
-            Clipboard.getSystemClipboard().setContent(content);
+            ChatInteractor interactor = interactorRef.get();
+            if (interactor != null) {
+                ClipboardContent content = new ClipboardContent();
+                content.putString(interactor.getTranscript());
+                Clipboard.getSystemClipboard().setContent(content);
+            }
         });
         // 最新ターンコピーボタンは不要になったため、単に全コピーボタンのみ表示
         topBar.getChildren().add(copyAllButton);
@@ -340,6 +373,17 @@ public class App extends Application {
         stage.setTitle(APP_NAME);
         stage.setScene(scene);
         stage.show();
+
+        // 起動後、セッションリストを表示して最新セッションを自動選択
+        Platform.runLater(() -> {
+            refreshSessionsRef[0].run();
+            var sessions = conversationStore.listSessions();
+            if (!sessions.isEmpty()) {
+                // 最新のセッション（リストの最初のもの）を選択
+                SessionSummary latestSession = sessions.get(0);
+                sessionList.getSelectionModel().select(latestSession);
+            }
+        });
     }
 
     /**
@@ -356,7 +400,11 @@ public class App extends Application {
             AtomicReference<ChatInteractor> interactorRef) {
         return () -> {
             sessionList.getItems().setAll(conversationStore.listSessions());
-            String currentSessionId = interactorRef.get().getCurrentSessionId();
+            ChatInteractor interactor = interactorRef.get();
+            if (interactor == null) {
+                return; // セッション未選択の場合は選択を更新しない
+            }
+            String currentSessionId = interactor.getCurrentSessionId();
             if (currentSessionId.isBlank()) {
                 return;
             }
@@ -540,7 +588,8 @@ public class App extends Application {
             WebEngine webEngine,
             Runnable refreshSessions,
             Label baseDirLabel,
-            String sessionId) {
+            String sessionId,
+            ConversationStore conversationStore) {
 
         if (Objects.isNull(sessionId) || sessionId.isBlank()) {
             return;
@@ -552,7 +601,12 @@ public class App extends Application {
 
         ChatInteractor selectedInteractor = rt.getInteractor();
         interactorRef.set(selectedInteractor);
-        updateWebPreview(webEngine, selectedInteractor.getTranscript());
+        
+        // プロバイダー情報を取得
+        ConversationSession session = conversationStore.loadByIdOrCreate(sessionId);
+        String provider = session.provider();
+        
+        updateWebPreview(webEngine, selectedInteractor.getTranscript(), provider);
         baseDirLabel.setText("作業ディレクトリ: " + selectedInteractor.getWorkingDirectory().toString());
 
         safelyRunRefreshSessions(refreshSessions);
@@ -599,10 +653,10 @@ public class App extends Application {
         if (remainings.isEmpty()) {
             ConversationSession created = conversationStore.createNewSession(workDir.toString());
             switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel,
-                    created.sessionId());
+                    created.sessionId(), conversationStore);
         } else {
             SessionSummary next = remainings.get(0);
-            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId());
+            switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId(), conversationStore);
         }
 
         safelyRunRefreshSessions(refreshSessions);
@@ -628,8 +682,9 @@ public class App extends Application {
      * 
      * @param webEngine  WebView の WebEngine
      * @param transcript 会話履歴のテキスト
+     * @param provider プロバイダー ("openai" または "gemini")
      */
-    private static void updateWebPreview(WebEngine webEngine, String transcript) {
+    private static void updateWebPreview(WebEngine webEngine, String transcript, String provider) {
         String sanitized = Objects.isNull(transcript) ? "" : transcript;
         sanitized = sanitized.replaceAll("[\uFEFF\u200B\u200C\u200D]", "");
         sanitized = sanitized.replaceAll("[\\p{Cc}&&[^\\r\\n\\t]]", "");
@@ -637,6 +692,11 @@ public class App extends Application {
         String body = sanitized.isBlank()
                 ? "<p class='empty'>（会話履歴はまだありません）</p>"
                 : renderTranscriptHtml(sanitized);
+        
+        String providerDisplay = "";
+        if (provider != null && !provider.isBlank()) {
+            providerDisplay = " (" + provider.toUpperCase() + ")";
+        }
 
         String html = """
                                                 <!DOCTYPE html>
@@ -675,7 +735,7 @@ public class App extends Application {
                                                     </style>
                                                 </head>
                                                 <body>
-                                                    <h2>会話プレビュー</h2>
+                                                    <h2>会話プレビュー%s</h2>
                                                     <div class='panel'>
                 %s
                                                     </div>
@@ -699,7 +759,7 @@ public class App extends Application {
                                                 </body>
                                                 </html>
                                                 """
-                .formatted(body, MARKED_JS_INLINE);
+                .formatted(providerDisplay, body, MARKED_JS_INLINE);
         webEngine.loadContent(html, "text/html");
     }
 
@@ -926,5 +986,110 @@ public class App extends Application {
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
+    }
+
+    /**
+     * プロバイダー選択ダイアログを表示して、ユーザーが選択したプロバイダーを返します。
+     * キャンセルの場合は null を返します。
+     * 設定済みのプロバイダーのみを表示します。
+     * 
+     * @return 選択されたプロバイダー（"openai" / "gemini"、キャンセル時は null）
+     */
+    private String showProviderSelectionDialog() {
+        java.util.List<String> availableProviders = ChatServiceFactory.getAvailableProviders();
+        
+        if (availableProviders.isEmpty()) {
+            Alert alert = new Alert(Alert.AlertType.ERROR);
+            alert.setTitle("エラー");
+            alert.setHeaderText("プロバイダーが設定されていません");
+            alert.setContentText("環境変数 MYAGENT2_API_KEY_OPENAI/GEMINI と MYAGENT2_BASE_URL_OPENAI/GEMINI を設定してください。");
+            alert.showAndWait();
+            return null;
+        }
+
+        if (availableProviders.size() == 1) {
+            return availableProviders.get(0);
+        }
+
+        Dialog<String> dialog = new Dialog<>();
+        dialog.setTitle("プロバイダーを選択");
+        dialog.setHeaderText("新しいセッションで使用するプロバイダーを選択してください");
+
+        ButtonType selectButtonType = new ButtonType("選択", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(selectButtonType, ButtonType.CANCEL);
+
+        javafx.scene.control.ComboBox<String> providerCombo = new javafx.scene.control.ComboBox<>();
+        
+        for (String provider : availableProviders) {
+            String displayName = "openai".equals(provider) ? "OpenAI" : "Gemini";
+            providerCombo.getItems().add(provider);
+        }
+        
+        if (!providerCombo.getItems().isEmpty()) {
+            providerCombo.setValue(providerCombo.getItems().get(0));
+        }
+
+        VBox contentBox = new VBox(8);
+        contentBox.setPadding(new Insets(16));
+        contentBox.getChildren().addAll(
+            new Label("プロバイダー:"),
+            providerCombo
+        );
+
+        dialog.getDialogPane().setContent(contentBox);
+        dialog.setResultConverter(bt -> 
+            bt == selectButtonType ? providerCombo.getValue() : null
+        );
+
+        return dialog.showAndWait().orElse(null);
+    }
+
+    /**
+     * モデル選択ダイアログを表示して、ユーザーが選択したモデル名を返します。
+     * キャンセルの場合は null を返します。
+     * 
+     * @return 選択されたモデル名（キャンセル時は null）
+     * @deprecated プロバイダー選択に移行したため、このメソッドは今後使用されません。
+     */
+    @Deprecated
+    private String showModelSelectionDialog() {
+        Dialog<String> dialog = new Dialog<>();
+        dialog.setTitle("モデルを選択");
+        dialog.setHeaderText("新しいセッションで使用するモデルを選択してください");
+
+        ButtonType selectButtonType = new ButtonType("選択", ButtonBar.ButtonData.OK_DONE);
+        dialog.getDialogPane().getButtonTypes().addAll(selectButtonType, ButtonType.CANCEL);
+
+        // 一般的なモデルのリスト
+        String[] modelOptions = {
+            "gpt-4o-mini",
+            "gpt-4o",
+            "gpt-4-turbo",
+            "gpt-4",
+            "claude-3-haiku",
+            "claude-3-sonnet",
+            "claude-3-opus",
+            "o1-mini",
+            "o1"
+        };
+
+        javafx.scene.control.ComboBox<String> modelCombo = new javafx.scene.control.ComboBox<>();
+        modelCombo.getItems().addAll(modelOptions);
+        modelCombo.setValue("gpt-4o-mini");
+        modelCombo.setEditable(false);
+
+        VBox contentBox = new VBox(8);
+        contentBox.setPadding(new Insets(16));
+        contentBox.getChildren().addAll(
+            new Label("モデル:"),
+            modelCombo
+        );
+
+        dialog.getDialogPane().setContent(contentBox);
+        dialog.setResultConverter(bt -> 
+            bt == selectButtonType ? modelCombo.getValue() : null
+        );
+
+        return dialog.showAndWait().orElse(null);
     }
 }
