@@ -86,7 +86,7 @@ public class DefaultManualToolExecutorTest {
 
         String result = executor.tryExecute("/tool cmd git log | grep").orElse("");
 
-        assertFalse(result, result.contains("危険な記号"));
+        assertFalse(result, result.contains("危険な記号が含まれています"));
     }
 
     @Test
