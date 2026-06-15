@@ -18,7 +18,8 @@ public class ChatInteractorBusyFlagTest {
                                             Consumer<String> onToken,
                                             Consumer<String> onComplete,
                                             Consumer<Throwable> onError,
-                                            Consumer<String> onProgress) {
+                                            Consumer<String> onProgress,
+                                            Consumer<TokenInfo> onTokenUsage) {
             new Thread(() -> {
                 try {
                     onToken.accept("partial1");
@@ -26,6 +27,9 @@ public class ChatInteractorBusyFlagTest {
                     onToken.accept("partial2");
                     Thread.sleep(120);
                     onComplete.accept("final-text");
+                    if (onTokenUsage != null) {
+                        onTokenUsage.accept(new TokenInfo(100, 50));
+                    }
                 } catch (Throwable t) {
                     onError.accept(t);
                 }

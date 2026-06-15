@@ -117,6 +117,7 @@ public class OpenAiCompatibleChatServiceCancelTest {
                 latch.countDown();
             },
             progress -> {},
+            tokenInfo -> {}, // onTokenUsage
             isCancelled
         );
 

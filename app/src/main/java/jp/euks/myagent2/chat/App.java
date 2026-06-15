@@ -184,6 +184,13 @@ public class App extends Application {
 
         Button sendButton = new Button("送信");
         Button cancelButton = new Button("キャンセル");
+        
+        // ★★★ tokenInfoLabel を先に定義（sendAction から参照するため）
+        Label tokenInfoLabel = new Label();
+        tokenInfoLabel.setId("token-info-label");
+        tokenInfoLabel.setPadding(new Insets(0, 10, 0, 5));
+        tokenInfoLabel.setStyle("-fx-font-size: 12; -fx-text-fill: #666;");
+        
         cancelButton.setDisable(true);
         cancelButton.setOnAction(ev -> {
             ChatInteractor active = interactorRef.get();
@@ -234,6 +241,26 @@ public class App extends Application {
                             refreshSessionsRef[0].run();
                             // 作業ディレクトリ表示を最新化（JSON が源泉）
                             baseDirLabel.setText("作業ディレクトリ: " + activeInteractor.getWorkingDirectory().toString());
+                            
+                            // ★★★ トークン情報を別 UI に表示（今回 + セッション累積）
+                            TokenInfo tokenInfo = activeInteractor.getLastTokenInfo();
+                            long sessIn = activeInteractor.getSessionTotalInputTokens();
+                            long sessOut = activeInteractor.getSessionTotalOutputTokens();
+                            if (tokenInfo != null) {
+                                String current = String.format("今回: input=%,d output=%,d (計%,d)",
+                                        tokenInfo.inputTokens(), tokenInfo.outputTokens(),
+                                        tokenInfo.inputTokens() + tokenInfo.outputTokens());
+                                String cumul = String.format("累積: input=%,d output=%,d (計%,d)",
+                                        sessIn, sessOut, sessIn + sessOut);
+                                tokenInfoLabel.setText("●トークン: " + current + "  /  " + cumul);
+                            } else if (sessIn + sessOut > 0) {
+                                String cumul = String.format("累積: input=%,d output=%,d (計%,d)",
+                                        sessIn, sessOut, sessIn + sessOut);
+                                tokenInfoLabel.setText("●トークン: " + cumul);
+                            } else {
+                                tokenInfoLabel.setText("●トークン: 取得不可");
+                            }
+                            
                             completeMessageHandling(inputField, sendButton, cancelButton, progressLabel, newChatButton,
                                     deleteChatButton, sessionList, null);
                         }),
@@ -250,7 +277,6 @@ public class App extends Application {
         };
 
         sendButton.setOnAction(event -> sendAction.run());
-
         inputField.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
             if (event.getCode() == KeyCode.ENTER && event.isControlDown()) {
                 event.consume();
@@ -259,7 +285,8 @@ public class App extends Application {
         });
 
         HBox inputRow = new HBox(8, inputField, sendButton, cancelButton);
-        VBox bottomBox = new VBox(4, progressLabel, inputRow);
+        HBox.setHgrow(inputField, Priority.ALWAYS);
+        VBox bottomBox = new VBox(4, progressLabel, tokenInfoLabel, inputRow);
         BorderPane chatPane = new BorderPane();
         chatPane.setCenter(webView);
         chatPane.setBottom(bottomBox);
@@ -844,7 +871,13 @@ public class App extends Application {
                 currentRole = "ASSISTANT";
                 currentContent = new StringBuilder(assistantMatcher.group(1));
             } else {
-                if (!"NONE".equals(currentRole)) {
+                // ★★★ 変更点: ロール判定より先にトークン行を最優先で検出
+                if (isTokenInfoLine(line)) {
+                    flushBlock(html, currentRole, currentContent.toString());
+                    currentRole = "NONE";
+                    currentContent.setLength(0);
+                    appendTokenInfoLineHtml(html, line);
+                } else if (!"NONE".equals(currentRole)) {
                     currentContent.append("\n").append(line);
                 } else if (!line.isBlank()) {
                     html.append("<div class='plain-content'>").append(escapeHtml(line)).append("</div>");
@@ -967,6 +1000,44 @@ public class App extends Application {
             return "";
         }
         return line.replaceFirst("^(You|Assistant):\\s+", "");
+    }
+
+    /**
+     * トークン情報行かどうかを判定するユーティリティ。
+     * 「●トークン: input=X output=Y (計Z)」形式の行を検出する。
+     * 
+     * @param line 判定対象の行
+     * @return 行がトークン情報行であれば true
+     */
+    private static boolean isTokenInfoLine(String line) {
+        if (Objects.isNull(line)) {
+            return false;
+        }
+        boolean matches = line.matches("^\\s*●トークン:\\s*input=.*output=.*計.*");
+        System.out.println("[DEBUG] isTokenInfoLine check: '" + line + "' -> " + matches);
+        return matches;
+    }
+
+    /**
+     * トークン情報行を HTML で表示する形式に変換して StringBuilder に追加するユーティリティ。
+     * 「●トークン: input=X output=Y (計Z)」を `<small>` タグで囲んで表示。
+     * 
+     * @param html HTML を構築する StringBuilder
+     * @param line トークン情報行（例：「●トークン: input=1,234 output=567 (計1,801)」）
+     */
+    private static void appendTokenInfoLineHtml(StringBuilder html, String line) {
+        // 複数ラウンドの場合、改行で分割して各行を処理
+        String[] lines = line.split("\n");
+        for (String tokenLine : lines) {
+            String trimmed = tokenLine.trim();
+            if (!trimmed.isEmpty()) {
+                System.out.println("[DEBUG] appendTokenInfoLineHtml called with: " + trimmed);
+                html.append("<div class='msg-row' style='justify-content: flex-end; margin-top: 8px;'>")
+                        .append("<span style='color: #999; font-size: 12px; font-family: monospace; border-left: 2px solid #ddd; padding-left: 8px;'>")
+                        .append(escapeHtml(trimmed))
+                        .append("</span></div>\n");
+            }
+        }
     }
 
     /**

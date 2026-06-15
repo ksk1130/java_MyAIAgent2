@@ -45,26 +45,7 @@ public interface ChatService {
     /**
      * 進捗通知対応版（ツール実行名を逐次通知）。
      * 既定実装は onProgress を無視し、従来通り一括応答。
-     */
-    default void streamReplyToWithHistory(
-            List<ChatMessage> history,
-            String userMessage,
-            Consumer<String> onToken,
-            Consumer<String> onComplete,
-            Consumer<Throwable> onError,
-            Consumer<String> onProgress) {
-        try {
-            String result = replyToWithHistory(history, userMessage);
-            onToken.accept(result);
-            onComplete.accept(result);
-        } catch (Exception e) {
-            onError.accept(e);
-        }
-    }
-
-    /**
-     * ストリーミング版の拡張: キャンセル判定を受け取るオーバーロード。
-     * 実装はこの判定を適宜参照して通知を止めることができる。
+     * トークン使用量は onTokenUsage コールバックで通知される。
      */
     default void streamReplyToWithHistory(
             List<ChatMessage> history,
@@ -73,21 +54,50 @@ public interface ChatService {
             Consumer<String> onComplete,
             Consumer<Throwable> onError,
             Consumer<String> onProgress,
-            java.util.function.BooleanSupplier isCancelled) {
-        // デフォルトはキャンセルを無視して既存実装へフォールバック
-        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, onProgress);
+            Consumer<TokenInfo> onTokenUsage) {
+        try {
+            String result = replyToWithHistory(history, userMessage);
+            onToken.accept(result);
+            onComplete.accept(result);
+            // デフォルト実装はトークン情報がないため、ダミー値を通知
+            if (onTokenUsage != null) {
+                onTokenUsage.accept(new TokenInfo(0, 0));
+            }
+        } catch (Exception e) {
+            onError.accept(e);
+        }
     }
 
     /**
-     * 従来のstreamReplyToWithHistory（onProgressなし）
+     * ストリーミング版の拡張: キャンセル判定を受け取るオーバーロード。
+     * 実装はこの判定を適宜参照して通知を止めることができる。
+     * トークン使用量は onTokenUsage コールバックで通知される。
      */
     default void streamReplyToWithHistory(
             List<ChatMessage> history,
             String userMessage,
             Consumer<String> onToken,
             Consumer<String> onComplete,
-            Consumer<Throwable> onError) {
-        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, null);
+            Consumer<Throwable> onError,
+            Consumer<String> onProgress,
+            Consumer<TokenInfo> onTokenUsage,
+            java.util.function.BooleanSupplier isCancelled) {
+        // デフォルトはキャンセルを無視して既存実装へフォールバック
+        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, onProgress, onTokenUsage);
+    }
+
+    /**
+     * 従来のstreamReplyToWithHistory（onProgress なし）。
+     * トークン使用量は onTokenUsage コールバックで通知される。
+     */
+    default void streamReplyToWithHistory(
+            List<ChatMessage> history,
+            String userMessage,
+            Consumer<String> onToken,
+            Consumer<String> onComplete,
+            Consumer<Throwable> onError,
+            Consumer<TokenInfo> onTokenUsage) {
+        streamReplyToWithHistory(history, userMessage, onToken, onComplete, onError, null, onTokenUsage);
     }
 
     /**

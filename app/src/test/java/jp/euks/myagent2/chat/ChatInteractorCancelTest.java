@@ -28,6 +28,7 @@ public class ChatInteractorCancelTest {
                 Consumer<String> onComplete,
                 Consumer<Throwable> onError,
                 Consumer<String> onProgress,
+                Consumer<TokenInfo> onTokenUsage,
                 BooleanSupplier isCancelled) {
 
             Thread t = new Thread(() -> {

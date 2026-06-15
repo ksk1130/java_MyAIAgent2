@@ -257,6 +257,7 @@ public class OpenAiCompatibleChatService implements ChatService {
      * @param onComplete 応答完了時
      * @param onError エラー時
      * @param onProgress ツール実行進捗通知（ツール名が切り替わるたび呼ばれる）
+     * @param onTokenUsage トークン使用量通知
      */
     public void streamReplyToWithHistory(
             List<ChatMessage> history,
@@ -264,7 +265,8 @@ public class OpenAiCompatibleChatService implements ChatService {
             Consumer<String> onToken,
             Consumer<String> onComplete,
             Consumer<Throwable> onError,
-            Consumer<String> onProgress) {
+            Consumer<String> onProgress,
+            Consumer<TokenInfo> onTokenUsage) {
         restoreMemory(history);
         toolExecutionTracker.clear();
         StringBuilder accumulated = new StringBuilder();
@@ -293,7 +295,14 @@ public class OpenAiCompatibleChatService implements ChatService {
                 }
                 reportedToolCount[0] = executions.size();
             })
-            .onCompleteResponse(ignored -> {
+            .onCompleteResponse(response -> {
+                // TokenUsage を取得して通知
+                if (onTokenUsage != null && response != null && response.tokenUsage() != null) {
+                    onTokenUsage.accept(new TokenInfo(
+                        response.tokenUsage().inputTokenCount(),
+                        response.tokenUsage().outputTokenCount()
+                    ));
+                }
                 if (accumulated.isEmpty()) {
                     try {
                         String result = assistant.chat(userMessage);
@@ -321,6 +330,14 @@ public class OpenAiCompatibleChatService implements ChatService {
 
     /**
      * キャンセル判定を受け取るオーバーロード版。
+     * @param history チャット履歴
+     * @param userMessage ユーザー発話
+     * @param onToken トークン逐次通知
+     * @param onComplete 応答完了時
+     * @param onError エラー時
+     * @param onProgress ツール実行進捗通知
+     * @param onTokenUsage トークン使用量通知
+     * @param isCancelled キャンセル判定
      */
     public void streamReplyToWithHistory(
             List<ChatMessage> history,
@@ -329,6 +346,7 @@ public class OpenAiCompatibleChatService implements ChatService {
             Consumer<String> onComplete,
             Consumer<Throwable> onError,
             Consumer<String> onProgress,
+            Consumer<TokenInfo> onTokenUsage,
             java.util.function.BooleanSupplier isCancelled) {
         restoreMemory(history);
         toolExecutionTracker.clear();
@@ -358,7 +376,14 @@ public class OpenAiCompatibleChatService implements ChatService {
                 }
                 reportedToolCount[0] = executions.size();
             })
-            .onCompleteResponse(ignored -> {
+            .onCompleteResponse(response -> {
+                // TokenUsage を取得して通知
+                if (onTokenUsage != null && response != null && response.tokenUsage() != null) {
+                    onTokenUsage.accept(new TokenInfo(
+                        response.tokenUsage().inputTokenCount(),
+                        response.tokenUsage().outputTokenCount()
+                    ));
+                }
                 if (isCancelled.getAsBoolean()) {
                     // キャンセル時でも完了通知を送って呼び出し元の後片付けを行わせる
                     onComplete.accept("");

@@ -39,6 +39,7 @@ public class ChatInteractor {
     private final AtomicLong requestCounter = new AtomicLong(0L);
     private volatile long activeRequestId = 0L;
     private volatile boolean cancelled = false;
+    private volatile TokenInfo lastTokenInfo = null;  // 最後のトークン情報を保持
 
     /**
      * 単純なコンストラクタ。既定の ManualToolExecutor を使用する。
@@ -248,6 +249,43 @@ public class ChatInteractor {
     }
 
     /**
+     * 最後のトークン使用情報を返す。
+     * startUserMessageStream 完了後に呼び出して、UI に表示する際に使用。
+     *
+     * @return 最後の TokenInfo、またはまだ処理がない場合は null
+     */
+    public TokenInfo getLastTokenInfo() {
+        return lastTokenInfo;
+    }
+
+    /**
+     * 現在のセッションで累積された入力トークン数を返す。
+     *
+     * @return 累積入力トークン数
+     */
+    public long getSessionTotalInputTokens() {
+        return currentSession == null ? 0L : currentSession.totalInputTokens();
+    }
+
+    /**
+     * 現在のセッションで累積された出力トークン数を返す。
+     *
+     * @return 累積出力トークン数
+     */
+    public long getSessionTotalOutputTokens() {
+        return currentSession == null ? 0L : currentSession.totalOutputTokens();
+    }
+
+    /**
+     * 現在のセッションで累積された合計トークン数を返す。
+     *
+     * @return 累積合計トークン数
+     */
+    public long getSessionTotalTokens() {
+        return getSessionTotalInputTokens() + getSessionTotalOutputTokens();
+    }
+
+    /**
      * ストリーミングでユーザーメッセージを処理する（進捗コールバック対応）。
      * 
      * @param rawInput   ユーザー入力
@@ -314,6 +352,8 @@ public class ChatInteractor {
         long requestId = requestCounter.incrementAndGet();
         activeRequestId = requestId;
         cancelled = false;
+        // 新しいリクエスト開始時に前回のトークン情報をリセットする。
+        lastTokenInfo = null;
 
         // マーク: ストリーミング中フラグを立て、完了時/エラー時にクリアする
         busy = true;
@@ -329,6 +369,8 @@ public class ChatInteractor {
         BooleanSupplier isCancelledSupplier = () -> (activeRequestId != requestId) || cancelled;
 
         try {
+            AtomicLong totalInputTokens = new AtomicLong(0);
+            AtomicLong totalOutputTokens = new AtomicLong(0);
             chatService.streamReplyToWithHistory(
                     conversationHistory,
                     expansion.expandedMessage(),
@@ -336,14 +378,9 @@ public class ChatInteractor {
                         if (isCancelledSupplier.getAsBoolean())
                             return;
                         onToken.accept(token);
-                    }, // 各トークンを UI に直接通知
+                    }, // onToken
                     fullLlmText -> {
-                        if (isCancelledSupplier.getAsBoolean()) {
-                            // キャンセル時は追加の履歴化を行わず、完了処理のみ行う
-                            wrappedOnComplete.run();
-                            return;
-                        }
-                        // ツール実行結果プレフィックスを付加
+                        // onComplete: ツール実行結果を処理して会話履歴に追加
                         String assistantMessage = fullLlmText;
                         String toolResultsText = "";
                         String finalLlmText = fullLlmText;
@@ -380,6 +417,17 @@ public class ChatInteractor {
                         }
 
                         syncWorkingDirectoryIfSetdirSucceeded(userMessage, assistantMessage);
+                        
+                        // トークン情報を保持（UI表示用）
+                        // メッセージに埋め込まない
+                        if (totalInputTokens.get() > 0 || totalOutputTokens.get() > 0) {
+                            lastTokenInfo = new TokenInfo((int) totalInputTokens.get(), (int) totalOutputTokens.get());
+                            // セッション累積にも加算しておく（persistConversation が保存する）
+                            if (currentSession != null) {
+                                currentSession.addTokenUsage(totalInputTokens.get(), totalOutputTokens.get());
+                            }
+                        }
+                        
                         conversationHistory.add(new ChatMessage("user", userMessage));
                         conversationHistory.add(new ChatMessage("assistant", assistantMessage));
 
@@ -406,6 +454,13 @@ public class ChatInteractor {
                             return;
                         if (onProgress != null)
                             onProgress.accept(progressText);
+                    },
+                    tokenInfo -> {
+                        if (tokenInfo == null) {
+                            return;
+                        }
+                        totalInputTokens.addAndGet(tokenInfo.inputTokens());
+                        totalOutputTokens.addAndGet(tokenInfo.outputTokens());
                     },
                     isCancelledSupplier);
         } catch (Exception e) {
@@ -569,6 +624,8 @@ public class ChatInteractor {
             return;
         }
         currentSession.replaceMessages(List.of());
+        // /clear は累積トークンもリセットする仕様
+        currentSession.clearTokenUsage();
         if (conversationStore != null) {
             conversationStore.save(currentSession);
         }

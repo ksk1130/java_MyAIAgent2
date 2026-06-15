@@ -25,6 +25,9 @@ public final class ConversationSession {
     private String transcript;
     /** このセッションで使用するプロバイダー（"openai" または "gemini"、未設定時は既定値を使用）。 */
     private String provider;
+    /** セッション累積のトークン使用量（永続化対象） */
+    private long totalInputTokens;
+    private long totalOutputTokens;
 
     /**
      * デフォルトコンストラクタ（シリアライズ用）。
@@ -125,6 +128,8 @@ public final class ConversationSession {
         this.workingDirectory = Objects.isNull(workingDirectory) ? "" : workingDirectory;
         this.transcript = transcript;
         this.provider = Objects.isNull(provider) ? "" : provider;
+        this.totalInputTokens = 0L;
+        this.totalOutputTokens = 0L;
     }
 
     /**
@@ -246,6 +251,43 @@ public final class ConversationSession {
      */
     public String provider() {
         return Objects.isNull(provider) ? "" : provider;
+    }
+
+    /**
+     * セッション累積の入力トークン数を返す。
+     *
+     * @return 累積入力トークン数
+     */
+    public synchronized long totalInputTokens() {
+        return totalInputTokens;
+    }
+
+    /**
+     * セッション累積の出力トークン数を返す。
+     *
+     * @return 累積出力トークン数
+     */
+    public synchronized long totalOutputTokens() {
+        return totalOutputTokens;
+    }
+
+    /**
+     * セッションに対してトークン使用量を追加する（累積）。
+     *
+     * @param input  入力トークン数
+     * @param output 出力トークン数
+     */
+    public synchronized void addTokenUsage(long input, long output) {
+        if (input > 0) this.totalInputTokens += input;
+        if (output > 0) this.totalOutputTokens += output;
+    }
+
+    /**
+     * 累積トークン使用量をリセットする（/clear 時に呼び出す）。
+     */
+    public synchronized void clearTokenUsage() {
+        this.totalInputTokens = 0L;
+        this.totalOutputTokens = 0L;
     }
 
     /**

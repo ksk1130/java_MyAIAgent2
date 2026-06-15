@@ -57,13 +57,17 @@ public class SessionRuntimeEvictionTest {
                                             Consumer<String> onToken,
                                             Consumer<String> onComplete,
                                             Consumer<Throwable> onError,
-                                            Consumer<String> onProgress) {
+                                            Consumer<String> onProgress,
+                                            Consumer<TokenInfo> onTokenUsage) {
             new Thread(() -> {
                 try {
                     onToken.accept("busy-start");
                     // 長めに待って busy 状態を維持
                     Thread.sleep(500);
                     onComplete.accept("done");
+                    if (onTokenUsage != null) {
+                        onTokenUsage.accept(new TokenInfo(100, 50));
+                    }
                 } catch (Throwable t) {
                     onError.accept(t);
                 } finally {
