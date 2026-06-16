@@ -126,7 +126,7 @@ public class App extends Application {
         // 共通削除処理を呼び出す
         deleteChatButton.setOnAction(event -> {
             deleteSessionAndSwitch(sessionList.getSelectionModel().getSelectedItem(), conversationStore, interactorRef,
-                    webEngine, refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager);
+                webEngine, refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager, sessionList);
         });
         deleteChatButton.disableProperty().bind(sessionList.getSelectionModel().selectedItemProperty().isNull());
 
@@ -477,8 +477,9 @@ public class App extends Application {
 
             javafx.scene.control.MenuItem deleteItem = new javafx.scene.control.MenuItem("削除");
             deleteItem.setOnAction(ev -> {
+                // pass sessionList so we can preserve selection index when deleting
                 deleteSessionAndSwitch(cell.getItem(), conversationStore, interactorRef, webEngine,
-                        refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager);
+                        refreshSessionsRef[0], baseDirLabel, workDir, runtimeManager, sessionList);
             });
 
             javafx.scene.control.MenuItem changeTitleItem = new javafx.scene.control.MenuItem("タイトルを変更");
@@ -652,7 +653,7 @@ public class App extends Application {
      * @param workDir           作業ディレクトリのパス
      * @param runtimeManager    セッションランタイムマネージャー
      */
-    private void deleteSessionAndSwitch(
+        private void deleteSessionAndSwitch(
             SessionSummary selected,
             ConversationStore conversationStore,
             AtomicReference<ChatInteractor> interactorRef,
@@ -660,7 +661,8 @@ public class App extends Application {
             Runnable refreshSessions,
             Label baseDirLabel,
             Path workDir,
-            SessionRuntimeManager runtimeManager) {
+            SessionRuntimeManager runtimeManager,
+            ListView<SessionSummary> sessionList) {
 
         if (Objects.isNull(selected))
             return;
@@ -674,6 +676,12 @@ public class App extends Application {
             return;
         }
 
+        // preserve the index of the selected item so we can pick the logical next item
+        int selectedIndex = -1;
+        if (sessionList != null && selected != null) {
+            selectedIndex = sessionList.getItems().indexOf(selected);
+        }
+
         conversationStore.deleteSession(selected.sessionId());
 
         java.util.List<SessionSummary> remainings = conversationStore.listSessions();
@@ -682,7 +690,11 @@ public class App extends Application {
             switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel,
                     created.sessionId(), conversationStore);
         } else {
-            SessionSummary next = remainings.get(0);
+            int idxToSelect = 0;
+            if (selectedIndex >= 0) {
+                idxToSelect = Math.min(selectedIndex, remainings.size() - 1);
+            }
+            SessionSummary next = remainings.get(idxToSelect);
             switchToSession(runtimeManager, interactorRef, webEngine, refreshSessions, baseDirLabel, next.sessionId(), conversationStore);
         }
 

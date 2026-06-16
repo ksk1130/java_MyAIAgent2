@@ -58,6 +58,16 @@ public interface ConversationStore {
     void save(ConversationSession session);
 
     /**
+     * 指定セッションをディスクへ保存するが、セッションの `updatedAt` を更新しない専用API。
+     * デフォルト実装は互換性のため `save(session)` を呼び出す。
+     *
+     * @param session 保存対象セッション
+     */
+    default void saveWithoutTouch(ConversationSession session) {
+        save(session);
+    }
+
+    /**
      * 指定セッションを削除する。存在しない場合は何もしない。
      *
      * @param sessionId 削除対象セッションID

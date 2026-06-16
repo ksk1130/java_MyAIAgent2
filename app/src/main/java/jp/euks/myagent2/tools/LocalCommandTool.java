@@ -520,15 +520,45 @@ public class LocalCommandTool {
             process.getOutputStream().close();
 
             // タイムアウト待機
+            // 出力を並行して読み取ることで、出力バッファ詰まりによるデッドロックを防ぐ
+            java.io.InputStream is = process.getInputStream();
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            Thread reader = new Thread(() -> {
+                try {
+                    byte[] buf = new byte[8192];
+                    int read;
+                    int total = 0;
+                    while ((read = is.read(buf)) != -1) {
+                        int toWrite = read;
+                        // enforce MAX_OUTPUT_CHARS guard to avoid OOM
+                        if (baos.size() + toWrite > MAX_OUTPUT_CHARS) {
+                            toWrite = Math.max(0, MAX_OUTPUT_CHARS - baos.size());
+                        }
+                        if (toWrite > 0) {
+                            baos.write(buf, 0, toWrite);
+                        }
+                        total += read;
+                        if (baos.size() >= MAX_OUTPUT_CHARS) {
+                            // keep reading the stream but discard beyond limit to avoid blocking; continue to drain
+                            // we still continue loop to fully consume stream
+                        }
+                    }
+                } catch (IOException ignored) {
+                }
+            }, "localcmd-output-reader");
+            reader.setDaemon(true);
+            reader.start();
+
             boolean finished = process.waitFor(commandTimeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroy();
+                try { reader.join(200); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
                 return new CommandResult(false, 124, "");
             }
 
-            // 出力を読み込む
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
-                .stripTrailing();
+            try { reader.join(2000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+
+            String output = new String(baos.toByteArray(), StandardCharsets.UTF_8).stripTrailing();
             int exitCode = process.exitValue();
             return new CommandResult(true, exitCode, output);
         } catch (InterruptedException e) {

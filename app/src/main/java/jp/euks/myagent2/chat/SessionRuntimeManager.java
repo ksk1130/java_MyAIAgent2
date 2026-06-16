@@ -111,7 +111,8 @@ public class SessionRuntimeManager {
             if (eldest != null) {
                 try {
                     if (eldest.getInteractor() != null) {
-                        eldest.getInteractor().save();
+                        // Use saveWithoutTouch to avoid updating session.updatedAt on eviction
+                        eldest.getInteractor().saveWithoutTouch();
                     }
                 } catch (Exception ignored) {
                 }

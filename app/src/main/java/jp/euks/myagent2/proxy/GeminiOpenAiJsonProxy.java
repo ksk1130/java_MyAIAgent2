@@ -21,6 +21,7 @@ import java.util.UUID;
  */
 public final class GeminiOpenAiJsonProxy {
     private static final Gson GSON = new Gson();
+    private static final java.util.concurrent.ConcurrentMap EMPTY_STORE = null;
 
     /**
      * 会話履歴を OpenAI Chat Completions の入力 JSON に変換する。
@@ -81,7 +82,7 @@ public final class GeminiOpenAiJsonProxy {
     /**
      * OpenAI 形式リクエスト JSON を Gemini generateContent 形式へ変換する。
      */
-    public static String toGeminiRequestJson(String openAiRequestJson) {
+    public static String toGeminiRequestJson(String openAiRequestJson, java.util.concurrent.ConcurrentMap<String, String> functionCallMetadataStore) {
         JsonObject openAiRoot = JsonParser.parseString(openAiRequestJson).getAsJsonObject();
         JsonObject geminiRoot = new JsonObject();
 
@@ -134,12 +135,30 @@ public final class GeminiOpenAiJsonProxy {
                         if (!toolCallId.isBlank()) {
                             toolCallIdToName.put(toolCallId, toolName);
                         }
-                        JsonObject functionCallPart = new JsonObject();
-                        JsonObject functionCall = new JsonObject();
-                        functionCall.addProperty("name", toolName);
-                        functionCall.add("args",
-                                parseJsonObjectOrEmpty(function.has("arguments") ? function.get("arguments") : null));
-                        functionCallPart.add("functionCall", functionCall);
+                        // 保存済みの Gemini part 全体（thought_signature 含む）を優先して再利用する。
+                        // stored には part ごとの JSON が入っており、thought_signature は part レベルのフィールド。
+                        // storedPart をそのまま parts に追加することで thought_signature が維持される。
+                        JsonObject functionCallPart;
+                        String stored = (functionCallMetadataStore == null) ? null : functionCallMetadataStore.get(toolCallId);
+                        if (stored != null && !stored.isBlank()) {
+                            try {
+                                functionCallPart = JsonParser.parseString(stored).getAsJsonObject();
+                            } catch (RuntimeException e) {
+                                functionCallPart = new JsonObject();
+                                JsonObject functionCall = new JsonObject();
+                                functionCall.addProperty("name", toolName);
+                                functionCall.add("args",
+                                        parseJsonObjectOrEmpty(function.has("arguments") ? function.get("arguments") : null));
+                                functionCallPart.add("functionCall", functionCall);
+                            }
+                        } else {
+                            functionCallPart = new JsonObject();
+                            JsonObject functionCall = new JsonObject();
+                            functionCall.addProperty("name", toolName);
+                            functionCall.add("args",
+                                    parseJsonObjectOrEmpty(function.has("arguments") ? function.get("arguments") : null));
+                            functionCallPart.add("functionCall", functionCall);
+                        }
                         parts.add(functionCallPart);
                     }
                 }
@@ -208,10 +227,10 @@ public final class GeminiOpenAiJsonProxy {
      * @return OpenAI 互換のレスポンス JSON
      */
 
-    public static String toOpenAiResponseJson(String geminiResponseJson, String model) {
+    public static String toOpenAiResponseJson(String geminiResponseJson, String model, java.util.concurrent.ConcurrentMap<String, String> functionCallMetadataStore) {
         JsonObject geminiRoot = JsonParser.parseString(geminiResponseJson).getAsJsonObject();
 
-        ResponseParts responseParts = extractResponsePartsFromGemini(geminiRoot);
+        ResponseParts responseParts = extractResponsePartsFromGemini(geminiRoot, functionCallMetadataStore);
         String finalText = responseParts.text;
         if (finalText.isBlank() && responseParts.toolCalls.isEmpty() && !responseParts.fallbackMessage.isBlank()) {
             finalText = responseParts.fallbackMessage;
@@ -371,7 +390,7 @@ public final class GeminiOpenAiJsonProxy {
      * @param geminiRoot 解析対象の Gemini JSON オブジェクト
      * @return 抽出結果を格納した ResponseParts
      */
-    private static ResponseParts extractResponsePartsFromGemini(JsonObject geminiRoot) {
+    private static ResponseParts extractResponsePartsFromGemini(JsonObject geminiRoot, java.util.concurrent.ConcurrentMap<String, String> functionCallMetadataStore) {
         ResponseParts result = new ResponseParts();
 
         if (geminiRoot.has("promptFeedback") && geminiRoot.get("promptFeedback").isJsonObject()) {
@@ -422,7 +441,10 @@ public final class GeminiOpenAiJsonProxy {
                 continue;
             }
             JsonObject part = partElement.getAsJsonObject();
-            if (part.has("text")) {
+            // thought:true なパーツはアシスタント応答テキストに含めない（thinking モデル用）
+            boolean isThoughtPart = part.has("thought") && !part.get("thought").isJsonNull()
+                    && part.get("thought").getAsBoolean();
+            if (part.has("text") && !isThoughtPart) {
                 text.append(part.get("text").getAsString());
             }
             if (part.has("functionCall") && part.get("functionCall").isJsonObject()) {
@@ -432,11 +454,23 @@ public final class GeminiOpenAiJsonProxy {
                     continue;
                 }
                 JsonObject toolCall = new JsonObject();
-                toolCall.addProperty("id", "call_" + UUID.randomUUID());
+                String generatedId = "call_" + UUID.randomUUID();
+                toolCall.addProperty("id", generatedId);
                 toolCall.addProperty("type", "function");
+
+                // Gemini の part 全体（thought_signature を含む）をストアへ保存する。
+                // functionCall オブジェクトではなく part ごと保存するのが重要。
+                // thought_signature は functionCall の子ではなく part レベルのフィールドであるため。
+                try {
+                    if (functionCallMetadataStore != null) {
+                        functionCallMetadataStore.put(generatedId, GSON.toJson(part));
+                    }
+                } catch (RuntimeException ignored) {
+                }
+
                 JsonObject function = new JsonObject();
                 function.addProperty("name", toolName);
-                JsonElement args = functionCall.get("args");
+                JsonElement args = functionCall.has("args") ? functionCall.get("args") : null;
                 if (args != null && !args.isJsonNull()) {
                     function.addProperty("arguments", GSON.toJson(args));
                 } else {

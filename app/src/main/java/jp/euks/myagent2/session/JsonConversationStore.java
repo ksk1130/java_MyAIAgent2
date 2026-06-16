@@ -114,6 +114,18 @@ public class JsonConversationStore implements ConversationStore {
     }
 
     @Override
+    public void saveWithoutTouch(ConversationSession session) {
+        ensureDirs();
+        // Do NOT touch the session.updatedAt — preserve it.
+        writeText(sessionPath(session.sessionId()), gson.toJson(session));
+
+        IndexData index = readIndex().orElseGet(IndexData::new);
+        // Do not modify latestSessionId when persisting due to eviction/flush.
+        upsertSummary(index, session);
+        writeText(indexPath(), gson.toJson(index));
+    }
+
+    @Override
     public void deleteSession(String sessionId) {
         ensureDirs();
         if (sessionId == null || sessionId.isBlank()) {

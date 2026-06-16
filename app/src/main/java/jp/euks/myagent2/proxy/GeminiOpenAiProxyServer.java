@@ -1,5 +1,6 @@
 package jp.euks.myagent2.proxy;
-
+
+
 
 import java.util.Objects;
 import com.sun.net.httpserver.HttpExchange;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * OpenAI Chat Completions 互換のローカルプロキシ。
@@ -35,6 +37,9 @@ public final class GeminiOpenAiProxyServer {
     private final HttpClient httpClient;
     private final String geminiBaseUrl;
     private final String apiKey;
+    // 一時的に Gemini の functionCall 部分（元のパーツ）を保持するストア
+    // key: tool_call_id, value: Json string of the original Gemini functionCall object
+    private final ConcurrentMap<String, String> functionCallMetadataStore = new ConcurrentHashMap<>();
 
     private GeminiOpenAiProxyServer(HttpServer server, String geminiBaseUrl, String apiKey) {
         this.server = server;
@@ -100,7 +105,7 @@ public final class GeminiOpenAiProxyServer {
                 openAiRequestJson.getBytes(StandardCharsets.UTF_8).length);
             log.debug("[{}] OpenAI request json: {}", requestId, abbreviate(openAiRequestJson, 4000));
 
-            String geminiRequestJson = GeminiOpenAiJsonProxy.toGeminiRequestJson(openAiRequestJson);
+            String geminiRequestJson = GeminiOpenAiJsonProxy.toGeminiRequestJson(openAiRequestJson, functionCallMetadataStore);
             log.debug("[{}] Converted Gemini request json: {}", requestId, abbreviate(geminiRequestJson, 4000));
 
             String targetUrl = buildGeminiGenerateContentUrl(model);
@@ -131,7 +136,7 @@ public final class GeminiOpenAiProxyServer {
                     return;
                 }
 
-                String openAiResponseJson = GeminiOpenAiJsonProxy.toOpenAiResponseJson(response.body(), model);
+                String openAiResponseJson = GeminiOpenAiJsonProxy.toOpenAiResponseJson(response.body(), model, functionCallMetadataStore);
                 log.debug("[{}] OpenAI response summary: {}",
                     requestId,
                     GeminiOpenAiJsonProxy.summarizeOpenAiResponse(openAiResponseJson));

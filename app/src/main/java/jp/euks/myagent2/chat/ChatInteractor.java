@@ -587,6 +587,25 @@ public class ChatInteractor {
     }
 
     /**
+     * 現在のセッション状態を永続化するが、セッションの `updatedAt` を更新しない保存を行う。
+     * 主にランタイム退避時のディスク書き出しに使用する。
+     */
+    public void saveWithoutTouch() {
+        if (Objects.isNull(conversationStore) || Objects.isNull(currentSession)) {
+            return;
+        }
+
+        // 同期: 作業ディレクトリ・メッセージ・トランスクリプトは通常通り同期するが updatedAt は触らない
+        java.nio.file.Path currentWd = chatService.getWorkingDirectory();
+        if (currentWd != null) {
+            currentSession.setWorkingDirectory(currentWd.toString());
+        }
+        currentSession.replaceMessages(conversationHistory);
+        currentSession.setTranscript(transcript.toString());
+        conversationStore.saveWithoutTouch(currentSession);
+    }
+
+    /**
      * 現在の進行中リクエストをキャンセルする。UI側のキャンセル操作から呼ぶ想定。
      */
     public void cancelCurrentRequest() {
