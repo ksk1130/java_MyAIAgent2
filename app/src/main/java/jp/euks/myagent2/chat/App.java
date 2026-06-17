@@ -31,6 +31,7 @@ import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
+import javafx.geometry.Orientation;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.Priority;
@@ -161,7 +162,8 @@ public class App extends Application {
         inputField.setPromptText("メッセージを入力... 例: /tool help（Ctrl+Enter で送信）");
         inputField.setWrapText(true);
         inputField.setPrefRowCount(3);
-        inputField.setMaxHeight(120);
+        // 高さ制限を解除して親コンテナの許す限り伸びるようにする
+        inputField.setMaxHeight(Double.MAX_VALUE);
         HBox.setHgrow(inputField, Priority.ALWAYS);
 
         // ベースディレクトリ表示と変更ボタン（送信アクションからも更新できるようここで生成）
@@ -286,10 +288,22 @@ public class App extends Application {
 
         HBox inputRow = new HBox(8, inputField, sendButton, cancelButton);
         HBox.setHgrow(inputField, Priority.ALWAYS);
+        // inputRow を垂直方向に伸ばせるように設定
+        VBox.setVgrow(inputRow, Priority.ALWAYS);
         VBox bottomBox = new VBox(4, progressLabel, tokenInfoLabel, inputRow);
-        BorderPane chatPane = new BorderPane();
-        chatPane.setCenter(webView);
-        chatPane.setBottom(bottomBox);
+
+        // WebView と入力欄を縦方向に分割する SplitPane を作成
+        SplitPane chatVerticalSplit = new SplitPane();
+        chatVerticalSplit.setOrientation(Orientation.VERTICAL);
+        // 上: WebView, 下: bottomBox
+        chatVerticalSplit.getItems().addAll(webView, bottomBox);
+        // 初期分割位置: 上側 80% / 下側 20%
+        chatVerticalSplit.setDividerPositions(0.80);
+        // bottomBox の推奨高さを指定して初期表示サイズを確保
+        bottomBox.setPrefHeight(180);
+
+        // 既存コードは chatPane を参照するので、Node として再利用する
+        javafx.scene.Node chatPane = chatVerticalSplit;
 
         SplitPane splitPane = new SplitPane(historyPane, chatPane);
         splitPane.setDividerPositions(0.24);
