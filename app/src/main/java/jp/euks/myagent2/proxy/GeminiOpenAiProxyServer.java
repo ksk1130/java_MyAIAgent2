@@ -155,14 +155,23 @@ public final class GeminiOpenAiProxyServer {
     }
 
     private String buildGeminiGenerateContentUrl(String model) {
-        // MYAGENT2_BASE_URL_GEMINI が既に完全なエンドポイント URL を含む場合はそのまま使用
-        if (geminiBaseUrl.contains(":generateContent")) {
-            return geminiBaseUrl;
+        return resolveGeminiGenerateContentUrl(geminiBaseUrl, model);
+    }
+
+    static String resolveGeminiGenerateContentUrl(String baseUrl, String model) {
+        // streamGenerateContent を誤って指定しても、JSON変換前提の generateContent に統一する。
+        if (baseUrl.contains(":streamGenerateContent")) {
+            return baseUrl.replace(":streamGenerateContent", ":generateContent");
         }
-        
-        // ベース URL のみの場合はモデル名を付加する（後方互換性）
+
+        // 完全な generateContent エンドポイントが指定されている場合はそのまま使用。
+        if (baseUrl.contains(":generateContent")) {
+            return baseUrl;
+        }
+
+        // ベース URL のみの場合はモデル名を付加する（後方互換性）。
         String encodedModel = URLEncoder.encode(model, StandardCharsets.UTF_8).replace("+", "%20");
-        return geminiBaseUrl + "/models/%s:generateContent".formatted(encodedModel);
+        return baseUrl + "/models/%s:generateContent".formatted(encodedModel);
     }
 
     private static String readBody(InputStream inputStream) throws IOException {
