@@ -137,6 +137,8 @@ public final class ChatServiceFactory {
 
     /**
      * Gemini 用の ChatService を生成します。
+     * LangChain4j のネイティブ GoogleAiGeminiChatModel を使用し、
+     * ツール統合とストリーミングに対応しています。
      */
     private static ChatService createGeminiService(Map<String, String> env, Path workDir) {
         String apiKey = trimToEmpty(env.get(ENV_API_KEY_GEMINI));
@@ -144,18 +146,8 @@ public final class ChatServiceFactory {
             return new StubChatService();
         }
 
-        String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_GEMINI));
-        if (baseUrl.isEmpty()) {
-            baseUrl = DEFAULT_BASE_URL_GEMINI;
-        }
-        baseUrl = normalizeBaseUrl(baseUrl);
-        
-        // Gemini プロキシ処理
-        EndpointAuth endpointAuth = resolveEndpoint(baseUrl, apiKey);
-
-        return new OpenAiCompatibleChatService(
-                endpointAuth.baseUrl(),
-                endpointAuth.apiKey(),
+        return new GeminiNativeChatService(
+                apiKey,
                 "gemini-2.0-flash",
                 new WorkspaceGrepTool(workDir),
                 new GitLogTool(workDir),
