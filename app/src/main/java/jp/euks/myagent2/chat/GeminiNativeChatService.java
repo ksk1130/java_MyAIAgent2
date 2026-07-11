@@ -2,10 +2,10 @@ package jp.euks.myagent2.chat;
 
 import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.openai.OpenAiChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiChatModel;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.googleai.GoogleAiGeminiStreamingChatModel;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -19,8 +19,8 @@ import java.util.Objects;
 
 /**
  * Google Gemini Native API 用の ChatService 実装。
- * OpenAI 互換インターフェースを通じて、Gemini API に直接接続する。
- * エンドポイントは https://generativelanguage.googleapis.com/v1beta/openai/ を使用。
+ * LangChain4j の GoogleAiGeminiChatModel を使用して、Gemini API に直接接続する。
+ * エンドポイント: https://generativelanguage.googleapis.com/v1beta
  */
 public class GeminiNativeChatService implements ChatService {
     private static final String DEFAULT_SYSTEM_PROMPT = """
@@ -68,7 +68,7 @@ public class GeminiNativeChatService implements ChatService {
      * 最小限のコンストラクタ（ツールなし）。
      */
     public GeminiNativeChatService(String apiKey, String modelName) {
-        this(apiKey, modelName, null, null, null, null, null);
+        this(apiKey, modelName, null, null, null, null, null, null);
     }
 
     /**
@@ -82,23 +82,44 @@ public class GeminiNativeChatService implements ChatService {
             FileReaderTool fileReaderTool,
             FileWriterTool fileWriterTool,
             LocalCommandTool localCommandTool) {
+        this(apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, null);
+    }
 
-        // Gemini native API は OpenAI 互換エンドポイント /openai/ をサポート
-        String baseUrl = "https://generativelanguage.googleapis.com/v1beta/openai/";
+    /**
+     * 完全なコンストラクタ（baseUrl カスタマイズ対応）。
+     */
+    public GeminiNativeChatService(
+            String apiKey,
+            String modelName,
+            WorkspaceGrepTool grepTool,
+            GitLogTool gitTool,
+            FileReaderTool fileReaderTool,
+            FileWriterTool fileWriterTool,
+            LocalCommandTool localCommandTool,
+            String baseUrl) {
 
-        ChatModel chatModel = OpenAiChatModel.builder()
-            .baseUrl(baseUrl)
+        // Gemini Native API を直接使用（OpenAI互換レイヤーなし）
+        var chatModelBuilder = GoogleAiGeminiChatModel.builder()
             .apiKey(apiKey)
             .modelName(modelName)
-            .temperature(0.2)
-            .build();
+            .temperature(0.2);
+        
+        if (baseUrl != null && !baseUrl.trim().isEmpty()) {
+            chatModelBuilder.baseUrl(baseUrl);
+        }
+        
+        ChatModel chatModel = chatModelBuilder.build();
 
-        StreamingChatModel streamingChatModel = OpenAiStreamingChatModel.builder()
-            .baseUrl(baseUrl)
+        var streamingModelBuilder = GoogleAiGeminiStreamingChatModel.builder()
             .apiKey(apiKey)
             .modelName(modelName)
-            .temperature(0.2)
-            .build();
+            .temperature(0.2);
+        
+        if (baseUrl != null && !baseUrl.trim().isEmpty()) {
+            streamingModelBuilder.baseUrl(baseUrl);
+        }
+
+        StreamingChatModel streamingChatModel = streamingModelBuilder.build();
 
         this.currentChatMemory = MessageWindowChatMemory.withMaxMessages(20);
         this.chatMemory = this.currentChatMemory;

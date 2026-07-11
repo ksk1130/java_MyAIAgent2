@@ -1,10 +1,8 @@
 package jp.euks.myagent2.chat;
 
 import java.util.Objects;
-import jp.euks.myagent2.proxy.*;
 import jp.euks.myagent2.tools.*;
 import java.nio.file.Path;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -77,12 +75,10 @@ public final class ChatServiceFactory {
      */
     static String getFirstAvailableProvider() {
         Map<String, String> env = System.getenv();
-        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty() &&
-            !trimToEmpty(env.get(ENV_BASE_URL_OPENAI)).isEmpty()) {
+        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty()) {
             return PROVIDER_OPENAI;
         }
-        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty() &&
-            !trimToEmpty(env.get(ENV_BASE_URL_GEMINI)).isEmpty()) {
+        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty()) {
             return PROVIDER_GEMINI;
         }
         return "";
@@ -97,12 +93,10 @@ public final class ChatServiceFactory {
         java.util.List<String> providers = new java.util.ArrayList<>();
         Map<String, String> env = System.getenv();
         
-        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty() &&
-            !trimToEmpty(env.get(ENV_BASE_URL_OPENAI)).isEmpty()) {
+        if (!trimToEmpty(env.get(ENV_API_KEY_OPENAI)).isEmpty()) {
             providers.add(PROVIDER_OPENAI);
         }
-        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty() &&
-            !trimToEmpty(env.get(ENV_BASE_URL_GEMINI)).isEmpty()) {
+        if (!trimToEmpty(env.get(ENV_API_KEY_GEMINI)).isEmpty()) {
             providers.add(PROVIDER_GEMINI);
         }
         
@@ -139,12 +133,15 @@ public final class ChatServiceFactory {
      * Gemini 用の ChatService を生成します。
      * LangChain4j のネイティブ GoogleAiGeminiChatModel を使用し、
      * ツール統合とストリーミングに対応しています。
+     * カスタム baseUrl 設定も対応。
      */
     private static ChatService createGeminiService(Map<String, String> env, Path workDir) {
         String apiKey = trimToEmpty(env.get(ENV_API_KEY_GEMINI));
         if (apiKey.isEmpty()) {
             return new StubChatService();
         }
+
+        String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_GEMINI));
 
         return new GeminiNativeChatService(
                 apiKey,
@@ -153,53 +150,8 @@ public final class ChatServiceFactory {
                 new GitLogTool(workDir),
                 new FileReaderTool(workDir),
                 new FileWriterTool(workDir),
-                new LocalCommandTool(workDir));
-    }
-
-    /**
-     * 環境変数と作業ディレクトリを使用して ChatService を生成する内部メソッド。
-     * 
-     * @param env     環境変数のマップ
-     * @param workDir ツールがアクセスする作業ディレクトリ
-     * @return ChatService 実装
-     */
-    private static ChatService createFromEnvWithWorkDir(Map<String, String> env, Path workDir) {
-        // This method is now replaced by createForSessionWithProvider
-        // Kept for backward compatibility during testing
-        String apiKey = trimToEmpty(env.get(ENV_API_KEY));
-        if (apiKey.isEmpty()) {
-            return new StubChatService();
-        }
-
-        String baseUrl = trimToEmpty(env.getOrDefault(ENV_BASE_URL, DEFAULT_BASE_URL_OPENAI));
-        String normalizedBaseUrl = normalizeBaseUrl(baseUrl.isEmpty() ? DEFAULT_BASE_URL_OPENAI : baseUrl);
-        EndpointAuth endpointAuth = resolveEndpoint(normalizedBaseUrl, apiKey);
-
-        return new OpenAiCompatibleChatService(
-                endpointAuth.baseUrl(),
-                endpointAuth.apiKey(),
-                "gpt-4o-mini",
-                new WorkspaceGrepTool(workDir),
-                new GitLogTool(workDir),
-                new FileReaderTool(workDir),
-                new FileWriterTool(workDir),
-                new LocalCommandTool(workDir));
-    }
-
-    /**
-     * ベースURLがGoogleを含む場合はプロキシサーバーを起動してエンドポイントを解決するユーティリティ。
-     * 
-     * @param normalizedBaseUrl 正規化されたベースURL
-     * @param apiKey            APIキー
-     * @return エンドポイント情報を含む EndpointAuth レコード
-     */
-    private static EndpointAuth resolveEndpoint(String normalizedBaseUrl, String apiKey) {
-        if (!containsGoogleHost(normalizedBaseUrl)) {
-            return new EndpointAuth(normalizedBaseUrl, apiKey);
-        }
-        GeminiOpenAiProxyServer.ProxyEndpoint endpoint = GeminiOpenAiProxyServer.ensureStarted(normalizedBaseUrl,
-                apiKey);
-        return new EndpointAuth(endpoint.baseUrl(), endpoint.apiKey());
+                new LocalCommandTool(workDir),
+                baseUrl);
     }
 
     /**
@@ -216,10 +168,6 @@ public final class ChatServiceFactory {
         return trimmed;
     }
 
-    static boolean containsGoogleHost(String baseUrl) {
-        return trimToEmpty(baseUrl).toLowerCase(Locale.ROOT).contains("google");
-    }
-
     /**
      * 文字列をトリムして、nullの場合は空文字に変換するユーティリティ。
      * 
@@ -231,14 +179,5 @@ public final class ChatServiceFactory {
             return "";
         }
         return value.trim();
-    }
-
-    /**
-     * エンドポイントのベースURLとAPIキーを保持するレコードクラス。
-     * 
-     * @param baseUrl エンドポイントのベースURL
-     * @param apiKey  エンドポイントにアクセスするためのAPIキー
-     */
-    private record EndpointAuth(String baseUrl, String apiKey) {
     }
 }

@@ -13,13 +13,9 @@ import org.junit.Test;
 public class ChatServiceFactoryTest {
     @Test
     public void getFirstAvailableProviderReturnsOpenAiWhenConfigured() {
-        Map<String, String> env = new HashMap<>();
-        env.put(ChatServiceFactory.ENV_API_KEY_OPENAI, "test-key");
-        env.put(ChatServiceFactory.ENV_BASE_URL_OPENAI, "https://api.openai.com/v1");
-
-        // Since we're testing static methods that read from System.getenv(),
-        // we would need to mock System.getenv() for a proper unit test.
-        // For now, this serves as an integration test.
+        // This test demonstrates that getFirstAvailableProvider checks only API keys
+        // (not base URLs), prioritizing OpenAI over Gemini.
+        // Actual testing requires mocking System.getenv()
     }
 
     @Test
@@ -43,10 +39,5 @@ public class ChatServiceFactoryTest {
     public void normalizeBaseUrlRemovesTrailingSlash() {
         assertEquals("https://example.test/v1", ChatServiceFactory.normalizeBaseUrl("https://example.test/v1/"));
         assertEquals("https://example.test/v1", ChatServiceFactory.normalizeBaseUrl(" https://example.test/v1 "));
-    }
-
-    @Test
-    public void containsGoogleHostDetectsGoogleUrl() {
-        assertTrue(ChatServiceFactory.containsGoogleHost("https://generativelanguage.googleapis.com/v1beta"));
     }
 }

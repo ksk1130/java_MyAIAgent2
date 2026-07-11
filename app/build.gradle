@@ -10,6 +10,7 @@ repositories {
 
 def javafxVersion = '21.0.3'
 def javafxClassifier = 'win'  // x64 Windows binaries — works via emulation on ARM64
+def langchain4jVersion = '1.17.2'
 
 dependencies {
     // Use JUnit test framework.
@@ -25,8 +26,9 @@ dependencies {
     implementation "org.openjfx:javafx-web:${javafxVersion}:${javafxClassifier}"
 
     // LangChain4j for AI services and Function Calling
-    implementation 'dev.langchain4j:langchain4j:1.12.2'
-    implementation 'dev.langchain4j:langchain4j-open-ai:1.12.2'
+    implementation "dev.langchain4j:langchain4j:${langchain4jVersion}"
+    implementation "dev.langchain4j:langchain4j-open-ai:${langchain4jVersion}"
+    implementation "dev.langchain4j:langchain4j-google-ai-gemini:${langchain4jVersion}"
     implementation 'org.apache.poi:poi-ooxml:5.4.1'
     implementation 'org.apache.tika:tika-core:2.9.2'
     implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'
