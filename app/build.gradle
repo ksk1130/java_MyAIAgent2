@@ -8,7 +8,7 @@ repositories {
     mavenCentral()
 }
 
-def javafxVersion = '21.0.3'
+def javafxVersion = '21.0.11'
 def javafxClassifier = 'win'  // x64 Windows binaries — works via emulation on ARM64
 def langchain4jVersion = '1.17.2'
 
