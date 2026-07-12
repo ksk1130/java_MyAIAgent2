@@ -1,52 +1,50 @@
 package jp.euks.myagent2.tools;
 
 import java.util.Objects;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
 /**
- * バイナリ添付のメタ情報を保存し、attachmentId から元ファイルを参照するストア。
+ * バイナリ添付のメタ情報をメモリで保持し、attachmentId から元ファイルを参照するストア。
+ * 添付メタ情報は永続化されず、プロセス内でのみ有効です。
  */
 public class BinaryAttachmentStore {
     private static final long MAX_BYTES = 10L * 1024L * 1024L;
     private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
             "pdf", "png", "jpeg", "jpg", "xlsx", "docx", "pptx");
 
-    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
     private final Path baseDir;
-    private final Path attachmentsDir;
+    private final Map<String, AttachmentMetadata> attachmentMetadata = new HashMap<>();
 
     /**
      * デフォルトコンストラクタ。カレントディレクトリを baseDir として使用します。
      * 
-     * @param baseDir 添付ファイルの保存先の基点となるディレクトリ（null の場合はカレントディレクトリ）
+     * @param baseDir 添付ファイルの基点となるディレクトリ（null の場合はカレントディレクトリ）
      */
     public BinaryAttachmentStore(Path baseDir) {
         Path resolvedBase = Objects.isNull(baseDir)
                 ? Path.of(System.getProperty("user.dir"))
                 : baseDir.toAbsolutePath().normalize();
         this.baseDir = resolvedBase;
-        this.attachmentsDir = this.baseDir.resolve(".myagent2").resolve("attachments");
     }
 
     /**
-     * 指定したパスのファイルを添付として検証・保存し、メタ情報を返します。
-     * 添付は attachmentsDir に保存され、メタ情報は JSON ファイルとして管理されます。
+     * 指定したパスのファイルを添付として検証・登録し、メタ情報を返します。
+     * メタ情報はメモリに保持され、永続化されません。
      * 
      * @param pathText 添付対象のファイルパス（絶対またはワークスペース相対）
-     * @return 保存された添付のメタ情報
-     * @throws IllegalArgumentException 添付の検証や保存に失敗した場合
+     * @return 登録された添付のメタ情報
+     * @throws IllegalArgumentException 添付の検証に失敗した場合
      */
     public AttachmentMetadata createAttachment(String pathText) {
         if (pathText == null || pathText.isBlank()) {
@@ -73,8 +71,6 @@ public class BinaryAttachmentStore {
             }
 
             byte[] data = java.nio.file.Files.readAllBytes(resolved);
-            ensureAttachmentDir();
-
             String id = UUID.randomUUID().toString();
             AttachmentMetadata metadata = new AttachmentMetadata(
                     id,
@@ -85,19 +81,15 @@ public class BinaryAttachmentStore {
                     OffsetDateTime.now().toString(),
                     sha256Hex(data));
 
-            java.nio.file.Files.writeString(
-                    metaPath(id),
-                    gson.toJson(metadata),
-                    StandardCharsets.UTF_8);
-
+            attachmentMetadata.put(id, metadata);
             return metadata;
         } catch (IOException e) {
-            throw new IllegalArgumentException("添付保存に失敗しました: " + e.getMessage());
+            throw new IllegalArgumentException("添付検証に失敗しました: " + e.getMessage());
         }
     }
 
     /**
-     * メタ情報 JSON を読み込み AttachmentMetadata を返します。
+     * メモリに保持されたメタ情報を返します。
      *
      * @param id 添付の識別子（UUID 形式）
      * @return メタ情報が存在すれば Optional に格納して返す
@@ -106,18 +98,7 @@ public class BinaryAttachmentStore {
         if (!isSafeId(id)) {
             return Optional.empty();
         }
-        Path path = metaPath(id);
-        if (!java.nio.file.Files.exists(path)) {
-            return Optional.empty();
-        }
-
-        try {
-            String json = java.nio.file.Files.readString(path, StandardCharsets.UTF_8);
-            AttachmentMetadata metadata = gson.fromJson(json, AttachmentMetadata.class);
-            return Optional.ofNullable(metadata);
-        } catch (Exception e) {
-            return Optional.empty();
-        }
+        return Optional.ofNullable(attachmentMetadata.get(id));
     }
 
     /**
@@ -216,25 +197,6 @@ public class BinaryAttachmentStore {
             throw new IllegalArgumentException("ベースディレクトリ外のパスは指定できません: " + pathText);
         }
         return resolved;
-    }
-
-    /**
-     * 添付メタ情報を保存するディレクトリを作成します（存在しない場合）。
-     *
-     * @throws IOException ディレクトリ作成に失敗した場合
-     */
-    private void ensureAttachmentDir() throws IOException {
-        java.nio.file.Files.createDirectories(attachmentsDir);
-    }
-
-    /**
-     * 添付メタ情報 JSON ファイルのパスを返します。
-     *
-     * @param id 添付の識別子
-     * @return attachmentsDir/<id>.json の Path
-     */
-    private Path metaPath(String id) {
-        return attachmentsDir.resolve(id + ".json");
     }
 
     /**

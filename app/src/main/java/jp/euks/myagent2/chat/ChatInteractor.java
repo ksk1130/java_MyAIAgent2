@@ -1,5 +1,7 @@
 package jp.euks.myagent2.chat;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import java.util.Objects;
 import jp.euks.myagent2.tools.*;
 import jp.euks.myagent2.common.*;
@@ -27,6 +29,8 @@ public class ChatInteractor {
     private static final Pattern ATTACHMENT_TOKEN_PATTERN = Pattern.compile("\\[\\[ATTACH:([a-f0-9\\-]{36})\\]\\]");
     private static final Pattern ASSISTANT_ATTACHMENT_TOKEN_PATTERN = Pattern.compile("\\[\\[ATTACH:[^\\]]+\\]\\]",
             Pattern.CASE_INSENSITIVE);
+    private static final String PROVIDER_OPENAI = "openai";
+    private static final String PROVIDER_GEMINI = "gemini";
 
     private final ChatService chatService;
     private final ManualToolExecutor manualToolExecutor;
@@ -88,6 +92,24 @@ public class ChatInteractor {
             ManualToolExecutor manualToolExecutor,
             ConversationStore conversationStore,
             String sessionId) {
+        this(chatService, manualToolExecutor, conversationStore, sessionId, null);
+    }
+
+    /**
+     * 永続化ストア・セッションID・添付ストアを指定するコンストラクタ（テスト用）。
+     *
+     * @param chatService        チャット応答サービス
+     * @param manualToolExecutor 手動ツール実行器
+     * @param conversationStore  会話履歴ストア（null の場合はメモリのみ）
+     * @param sessionId          読み込むセッションID（null/空の場合は最新）
+     * @param attachmentStore    添付ストア（null の場合は新規作成）
+     */
+    public ChatInteractor(
+            ChatService chatService,
+            ManualToolExecutor manualToolExecutor,
+            ConversationStore conversationStore,
+            String sessionId,
+            BinaryAttachmentStore attachmentStore) {
         this.chatService = chatService;
         this.manualToolExecutor = manualToolExecutor;
         this.conversationStore = conversationStore;
@@ -130,7 +152,9 @@ public class ChatInteractor {
             }
         }
         this.currentSession = loadedSession;
-        this.attachmentStore = new BinaryAttachmentStore(getWorkingDirectory());
+        this.attachmentStore = attachmentStore != null
+                ? attachmentStore
+                : new BinaryAttachmentStore(getWorkingDirectory());
     }
 
     /**
@@ -705,6 +729,9 @@ public class ChatInteractor {
         Matcher matcher = ATTACHMENT_TOKEN_PATTERN.matcher(userMessage);
         StringBuffer expanded = new StringBuffer();
         boolean found = false;
+        boolean hasImageAttachment = false;
+
+        java.util.List<AttachmentTokenMatch> tokenMatches = new java.util.ArrayList<>();
 
         while (matcher.find()) {
             found = true;
@@ -716,6 +743,17 @@ public class ChatInteractor {
             }
 
             BinaryAttachmentStore.AttachmentMetadata meta = metaOpt.get();
+            boolean image = meta.mimeType() != null && meta.mimeType().toLowerCase().startsWith("image/");
+            hasImageAttachment = hasImageAttachment || image;
+            tokenMatches.add(new AttachmentTokenMatch(
+                    matcher.start(),
+                    matcher.end(),
+                    attachmentId,
+                    meta.filename(),
+                    meta.mimeType(),
+                    base64Opt.get(),
+                    image));
+
             String replacement = "attachment(id=%s,name=\"".formatted(attachmentId) + meta.filename()
                     + "\",mime=\"%s\",base64=\"".formatted(meta.mimeType()) + base64Opt.get() + "\")";
             matcher.appendReplacement(expanded, Matcher.quoteReplacement(replacement));
@@ -724,8 +762,138 @@ public class ChatInteractor {
         if (!found) {
             return AttachmentExpansionResult.success(userMessage);
         }
+
+        if (hasImageAttachment) {
+            return AttachmentExpansionResult.success(buildMultimodalJsonMessage(userMessage, tokenMatches));
+        }
+
         matcher.appendTail(expanded);
         return AttachmentExpansionResult.success(expanded.toString());
+    }
+
+    private String buildMultimodalJsonMessage(String userMessage, java.util.List<AttachmentTokenMatch> tokenMatches) {
+        String provider = resolveProviderForMultimodal();
+        if (PROVIDER_GEMINI.equals(provider)) {
+            return buildGeminiMultimodalJson(userMessage, tokenMatches);
+        }
+        return buildOpenAiMultimodalJson(userMessage, tokenMatches);
+    }
+
+    private String buildOpenAiMultimodalJson(String userMessage, java.util.List<AttachmentTokenMatch> tokenMatches) {
+        JsonObject payload = new JsonObject();
+        JsonArray content = new JsonArray();
+
+        int cursor = 0;
+        for (AttachmentTokenMatch token : tokenMatches) {
+            String text = userMessage.substring(cursor, token.start());
+            if (!text.isEmpty()) {
+                JsonObject textPart = new JsonObject();
+                textPart.addProperty("type", "text");
+                textPart.addProperty("text", text);
+                content.add(textPart);
+            }
+
+            if (token.image()) {
+                JsonObject imagePart = new JsonObject();
+                imagePart.addProperty("type", "image_url");
+                JsonObject imageUrl = new JsonObject();
+                imageUrl.addProperty("url", "data:" + token.mimeType() + ";base64," + token.base64());
+                imagePart.add("image_url", imageUrl);
+                content.add(imagePart);
+            } else {
+                JsonObject textPart = new JsonObject();
+                textPart.addProperty("type", "text");
+                textPart.addProperty("text", legacyAttachmentText(token));
+                content.add(textPart);
+            }
+            cursor = token.end();
+        }
+
+        String tail = userMessage.substring(cursor);
+        if (!tail.isEmpty()) {
+            JsonObject textPart = new JsonObject();
+            textPart.addProperty("type", "text");
+            textPart.addProperty("text", tail);
+            content.add(textPart);
+        }
+
+        payload.addProperty("format", "openai_chat_completions_multimodal");
+        payload.add("content", content);
+        return payload.toString();
+    }
+
+    private String buildGeminiMultimodalJson(String userMessage, java.util.List<AttachmentTokenMatch> tokenMatches) {
+        JsonObject payload = new JsonObject();
+        JsonArray parts = new JsonArray();
+
+        int cursor = 0;
+        for (AttachmentTokenMatch token : tokenMatches) {
+            String text = userMessage.substring(cursor, token.start());
+            if (!text.isEmpty()) {
+                JsonObject textPart = new JsonObject();
+                textPart.addProperty("text", text);
+                parts.add(textPart);
+            }
+
+            if (token.image()) {
+                JsonObject inlineDataPart = new JsonObject();
+                JsonObject inlineData = new JsonObject();
+                inlineData.addProperty("mime_type", token.mimeType());
+                inlineData.addProperty("data", token.base64());
+                inlineDataPart.add("inline_data", inlineData);
+                parts.add(inlineDataPart);
+            } else {
+                JsonObject textPart = new JsonObject();
+                textPart.addProperty("text", legacyAttachmentText(token));
+                parts.add(textPart);
+            }
+            cursor = token.end();
+        }
+
+        String tail = userMessage.substring(cursor);
+        if (!tail.isEmpty()) {
+            JsonObject textPart = new JsonObject();
+            textPart.addProperty("text", tail);
+            parts.add(textPart);
+        }
+
+        JsonObject content = new JsonObject();
+        content.add("parts", parts);
+        JsonArray contents = new JsonArray();
+        contents.add(content);
+
+        payload.addProperty("format", "gemini_generate_content_multimodal");
+        payload.add("contents", contents);
+        return payload.toString();
+    }
+
+    private String resolveProviderForMultimodal() {
+        String provider = currentSession == null ? "" : currentSession.provider();
+        if (provider != null && !provider.isBlank()) {
+            String normalized = provider.trim().toLowerCase();
+            if (PROVIDER_GEMINI.equals(normalized) || PROVIDER_OPENAI.equals(normalized)) {
+                return normalized;
+            }
+        }
+        if (chatService instanceof GeminiNativeChatService) {
+            return PROVIDER_GEMINI;
+        }
+        return PROVIDER_OPENAI;
+    }
+
+    private String legacyAttachmentText(AttachmentTokenMatch token) {
+        return "attachment(id=%s,name=\"".formatted(token.id()) + token.filename()
+                + "\",mime=\"%s\",base64=\"".formatted(token.mimeType()) + token.base64() + "\")";
+    }
+
+    private record AttachmentTokenMatch(
+            int start,
+            int end,
+            String id,
+            String filename,
+            String mimeType,
+            String base64,
+            boolean image) {
     }
 
     /**

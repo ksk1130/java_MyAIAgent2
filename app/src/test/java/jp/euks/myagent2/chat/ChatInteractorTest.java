@@ -270,10 +270,10 @@ public class ChatInteractorTest {
     @Test
     public void onUserMessageExpandsAttachmentTokenOnlyForModelInput() throws Exception {
         Path tempDir = Files.createTempDirectory("interactor-attach-ok");
-        Path binary = tempDir.resolve("sample.pdf");
-        Files.write(binary, new byte[] {0x25, 0x50, 0x44, 0x46});
+        Path binary = tempDir.resolve("sample.png");
+        Files.write(binary, new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47});
         BinaryAttachmentStore store = new BinaryAttachmentStore(tempDir);
-        String id = store.createAttachment("sample.pdf").id();
+        String id = store.createAttachment("sample.png").id();
 
         FakeConversationStore conversationStore = new FakeConversationStore();
         conversationStore.session.setWorkingDirectory(tempDir.toString());
@@ -297,15 +297,56 @@ public class ChatInteractorTest {
             }
         };
 
-        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty(), conversationStore);
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty(), conversationStore, null, store);
 
         String raw = "確認してください [[ATTACH:" + id + "]]";
         interactor.onUserMessage(raw);
 
-        assertTrue(modelInput.get(), modelInput.get().contains("base64=\""));
+        assertTrue(modelInput.get(), modelInput.get().contains("\"format\":\"openai_chat_completions_multimodal\""));
+        assertTrue(modelInput.get(), modelInput.get().contains("\"type\":\"image_url\""));
+        assertTrue(modelInput.get(), modelInput.get().contains("\"url\":\"data:image/png;base64,"));
         ConversationSession saved = conversationStore.savedSessions.get(conversationStore.savedSessions.size() - 1);
         assertEquals(raw, saved.messages().get(0).content());
         assertTrue(interactor.getTranscript().contains(raw));
+    }
+
+    @Test
+    public void onUserMessageExpandsAttachmentTokenAsGeminiMultimodalJson() throws Exception {
+        Path tempDir = Files.createTempDirectory("interactor-attach-gemini");
+        Path binary = tempDir.resolve("sample.png");
+        Files.write(binary, new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47});
+        BinaryAttachmentStore store = new BinaryAttachmentStore(tempDir);
+        String id = store.createAttachment("sample.png").id();
+
+        FakeConversationStore conversationStore = new FakeConversationStore();
+        conversationStore.session.setWorkingDirectory(tempDir.toString());
+        conversationStore.session.setProvider("gemini");
+        java.util.concurrent.atomic.AtomicReference<String> modelInput = new java.util.concurrent.atomic.AtomicReference<>("");
+
+        ChatService service = new ChatService() {
+            @Override
+            public String replyTo(String userMessage) {
+                return "unused";
+            }
+
+            @Override
+            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
+                modelInput.set(userMessage);
+                return "ok";
+            }
+
+            @Override
+            public Path getWorkingDirectory() {
+                return tempDir;
+            }
+        };
+
+        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty(), conversationStore, null, store);
+        interactor.onUserMessage("画像確認 [[ATTACH:" + id + "]]");
+
+        assertTrue(modelInput.get(), modelInput.get().contains("\"format\":\"gemini_generate_content_multimodal\""));
+        assertTrue(modelInput.get(), modelInput.get().contains("\"inline_data\""));
+        assertTrue(modelInput.get(), modelInput.get().contains("\"mime_type\":\"image/png\""));
     }
 
     @Test
@@ -434,6 +475,26 @@ public class ChatInteractorTest {
 
         assertEquals(2, callCount.get());
         assertTrue(turn, turn.contains("要約結果: 売上データは月次で増加傾向です。"));
+    }
+
+    @Test
+    public void binaryAttachmentStoreDoesNotCreateMyagent2Directory() throws Exception {
+        Path tempDir = Files.createTempDirectory("attach-memory-only");
+        Path sample = tempDir.resolve("test.png");
+        Files.write(sample, new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47});
+
+        // 添付ストアを作成してファイルを登録
+        BinaryAttachmentStore store = new BinaryAttachmentStore(tempDir);
+        String id = store.createAttachment("test.png").id();
+
+        // .myagent2 ディレクトリが作成されていないことを確認
+        Path myagent2 = tempDir.resolve(".myagent2");
+        assertFalse(".myagent2 directory should NOT be created in memory-only mode", Files.exists(myagent2));
+
+        // 登録されたメタデータはメモリに保持され、アクセス可能
+        assertTrue("Attachment metadata should be accessible", store.getMeta(id).isPresent());
+        assertTrue("Base64 should be retrievable", store.getBase64(id).isPresent());
+        assertTrue("File should exist", store.exists(id));
     }
 
     private static final class FakeConversationStore implements ConversationStore {
