@@ -1,0 +1,19 @@
+{
+  "servers": [
+    {
+      "name": "example-filesystem",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": {},
+      "enabled": false,
+      "_comment": "サードパーティ MCP サーバーの例。enabled を true にして起動コマンドを設定してください。"
+    },
+    {
+      "name": "example-http",
+      "type": "http",
+      "url": "http://localhost:3000/sse",
+      "enabled": false,
+      "_comment": "HTTP/SSE トランスポートの例。enabled を true にして url を設定してください。"
+    }
+  ]
+}

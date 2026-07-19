@@ -53,7 +53,7 @@ public class SessionRuntimeManager {
         ConversationSession session = conversationStore.loadByIdOrCreate(sessionId);
         String provider = (session != null) ? session.provider() : "";
         ChatService svc = ChatServiceFactory.createForSessionWithProvider(baseWorkDir, provider);
-        ChatInteractor interactor = new ChatInteractor(svc, new DefaultManualToolExecutor(), conversationStore,
+        ChatInteractor interactor = new ChatInteractor(svc, new DefaultManualToolExecutor(svc.getMcpToolRegistry()), conversationStore,
                 sessionId);
         rt = new SessionRuntime(sessionId, svc, interactor);
         map.put(sessionId, rt);

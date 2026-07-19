@@ -29,6 +29,8 @@ dependencies {
     implementation "dev.langchain4j:langchain4j:${langchain4jVersion}"
     implementation "dev.langchain4j:langchain4j-open-ai:${langchain4jVersion}"
     implementation "dev.langchain4j:langchain4j-google-ai-gemini:${langchain4jVersion}"
+    // MCP (Model Context Protocol) client support for pluggable external tool servers
+    implementation "dev.langchain4j:langchain4j-mcp:${langchain4jVersion}-beta27"
     implementation 'org.apache.poi:poi-ooxml:5.4.1'
     implementation 'org.apache.tika:tika-core:2.9.2'
     implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'

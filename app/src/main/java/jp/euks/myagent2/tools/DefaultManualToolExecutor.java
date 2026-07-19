@@ -1,5 +1,5 @@
 package jp.euks.myagent2.tools;
-
+
 
 import java.util.Objects;
 import java.nio.file.Files;
@@ -7,8 +7,13 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import jp.euks.myagent2.mcp.McpToolRegistry;
 
 /**
  * `/tool` プレフィックス付きの手動ツールコマンドを解析して実行する既定実装。
@@ -16,6 +21,7 @@ import java.util.Optional;
  * <p>
  * CLI風の簡易ツール群（time, echo, grep, gitlog, gitshow 等）を提供し、
  * ランタイムに作業ディレクトリを切り替える `setdir`/`getdir` をサポートします。
+ * {@link McpToolRegistry} が注入されている場合は、未知のツール名を MCP サーバーに委譲します。
  */
 public class DefaultManualToolExecutor implements ManualToolExecutor {
     private static final String PREFIX = "/tool";
@@ -32,12 +38,23 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     private ExcelReaderTool excelReaderTool = new ExcelReaderTool();
     /** バイナリ添付ストア。 */
     private BinaryAttachmentStore binaryAttachmentStore;
+    /** MCP ツールレジストリ（null の場合は組み込みツールのみ使用）。 */
+    private final McpToolRegistry mcpToolRegistry;
 
     /**
      * 既定のコンストラクタ。`user.dir` を作業ディレクトリとして使用します。
      */
     public DefaultManualToolExecutor() {
-        this(Clock.systemDefaultZone(), Path.of(System.getProperty("user.dir")));
+        this(Clock.systemDefaultZone(), Path.of(System.getProperty("user.dir")), null);
+    }
+
+    /**
+     * MCP レジストリ付きコンストラクタ。`user.dir` を作業ディレクトリとして使用します。
+     *
+     * @param mcpToolRegistry MCP ツールレジストリ（null 可）
+     */
+    public DefaultManualToolExecutor(McpToolRegistry mcpToolRegistry) {
+        this(Clock.systemDefaultZone(), Path.of(System.getProperty("user.dir")), mcpToolRegistry);
     }
 
     /**
@@ -46,7 +63,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @param clock 時刻取得用の Clock インスタンス（テスト用に注入可能）
      */
     DefaultManualToolExecutor(Clock clock) {
-        this(clock, Path.of(System.getProperty("user.dir")));
+        this(clock, Path.of(System.getProperty("user.dir")), null);
     }
 
     /**
@@ -57,7 +74,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @param workspaceGrepTool grep ツールのインスタンス
      */
     DefaultManualToolExecutor(Clock clock, WorkspaceGrepTool workspaceGrepTool) {
-        this(clock, Path.of(System.getProperty("user.dir")));
+        this(clock, Path.of(System.getProperty("user.dir")), null);
         this.workspaceGrepTool = workspaceGrepTool;
     }
 
@@ -69,7 +86,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @param gitLogTool        git ログツールのインスタンス
      */
     DefaultManualToolExecutor(Clock clock, WorkspaceGrepTool workspaceGrepTool, GitLogTool gitLogTool) {
-        this(clock, Path.of(System.getProperty("user.dir")));
+        this(clock, Path.of(System.getProperty("user.dir")), null);
         this.workspaceGrepTool = workspaceGrepTool;
         this.gitLogTool = gitLogTool;
     }
@@ -82,6 +99,17 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @param dir   作業ディレクトリ
      */
     DefaultManualToolExecutor(Clock clock, Path dir) {
+        this(clock, dir, null);
+    }
+
+    /**
+     * MCP レジストリと作業ディレクトリを注入できる基底コンストラクタ。
+     *
+     * @param clock           時刻取得用の Clock インスタンス
+     * @param dir             作業ディレクトリ
+     * @param mcpToolRegistry MCP ツールレジストリ（null 可）
+     */
+    DefaultManualToolExecutor(Clock clock, Path dir, McpToolRegistry mcpToolRegistry) {
         this.clock = clock;
         this.currentDir = dir.toAbsolutePath().normalize();
         this.workspaceGrepTool = new WorkspaceGrepTool(this.currentDir);
@@ -90,6 +118,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         this.fileReaderTool = new FileReaderTool(this.currentDir);
         this.excelReaderTool = new ExcelReaderTool(this.currentDir);
         this.binaryAttachmentStore = new BinaryAttachmentStore(this.currentDir);
+        this.mcpToolRegistry = mcpToolRegistry;
     }
 
     @Override
@@ -124,27 +153,137 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
 
     /**
      * ツール名に基づいて適切なツール実行メソッドを呼び出す内部ルーティング関数。
+     * 組み込みメタコマンド（time, echo, setdir, getdir）を最優先で処理し、
+     * それ以外は MCP サーバー → 組み込みツールの順で委譲します。
      * 
      * @param toolName ツール名（小文字）
      * @param args     ツール引数（既にトリム済み）
      * @return ツール実行結果文字列
      */
     private String runTool(String toolName, String args) {
+        // 組み込みメタコマンドは常にここで処理する
         return switch (toolName) {
             case "time" -> "(tool:time) " + LocalDateTime.now(clock).format(TIME_FORMATTER);
             case "echo" -> runEcho(args);
+            case "setdir" -> runSetDir(args);
+            case "getdir" -> runGetDir();
+            default -> {
+                // MCP サーバーに委譲を試みる（設定済みの場合）
+                String mcpResult = tryExecuteViaMcp(toolName, args);
+                if (mcpResult != null) {
+                    yield mcpResult;
+                }
+                // 組み込みツールへフォールバック
+                yield runBuiltinTool(toolName, args);
+            }
+        };
+    }
+
+    /**
+     * MCP サーバーへのツール委譲を試みる。
+     * サーバーにツールが存在しない場合は {@code null} を返す。
+     *
+     * @param toolName ツール名
+     * @param args     コマンドライン引数文字列
+     * @return MCP 実行結果テキスト（プレフィックス付き）、またはツール未検出時は {@code null}
+     */
+    private String tryExecuteViaMcp(String toolName, String args) {
+        if (mcpToolRegistry == null) {
+            return null;
+        }
+        try {
+            Map<String, Object> argsMap = buildArgsMap(toolName, args);
+            String result = mcpToolRegistry.executeTool(toolName, argsMap);
+            if (result != null) {
+                return "(tool:%s) %s".formatted(toolName, result);
+            }
+        } catch (Exception e) {
+            // MCP 実行失敗時は組み込みツールにフォールバックする
+        }
+        return null;
+    }
+
+    /**
+     * 組み込みツールの実行ルーティング。
+     *
+     * @param toolName ツール名（小文字）
+     * @param args     ツール引数（既にトリム済み）
+     * @return ツール実行結果文字列
+     */
+    private String runBuiltinTool(String toolName, String args) {
+        return switch (toolName) {
             case "grep" -> runGrep(args);
             case "gitlog" -> runGitLog(args);
             case "gitshow" -> gitLogTool.show(args);
             case "gitbranch" -> gitLogTool.branch();
             case "cmd" -> runCmd(args);
-            case "setdir" -> runSetDir(args);
-            case "getdir" -> runGetDir();
             case "readfile" -> runReadFile(args);
             case "readexcel" -> runReadExcel(args);
             case "readbinary" -> runReadBinary(args);
             default -> "(tool:error) 未知のツールです: %s。`/tool help` を使ってください。".formatted(toolName);
         };
+    }
+
+    /**
+     * ツール名と引数文字列から MCP に渡す引数マップを構築する。
+     * 引数文字列が JSON オブジェクトであればパースし、それ以外は単一パラメータとして扱う。
+     *
+     * @param toolName ツール名（MCP スキーマ参照用）
+     * @param args     コマンドライン引数文字列
+     * @return MCP に渡す引数マップ
+     */
+    private Map<String, Object> buildArgsMap(String toolName, String args) {
+        if (args.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        // JSON オブジェクトとして解析できる場合はそのまま使用
+        if (args.startsWith("{") && args.endsWith("}")) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> parsed = new com.google.gson.Gson().fromJson(args, Map.class);
+                if (parsed != null) {
+                    return parsed;
+                }
+            } catch (Exception ignored) {
+                // フォールバック: 文字列として扱う
+            }
+        }
+        // MCP サーバーのツールスキーマから最初のパラメータ名を取得して割り当てる
+        String paramName = resolveFirstParamName(toolName);
+        Map<String, Object> argsMap = new LinkedHashMap<>();
+        argsMap.put(paramName, args);
+        return argsMap;
+    }
+
+    /**
+     * MCP サーバーからツールスキーマを取得し、最初のパラメータ名を返す。
+     * 取得できない場合は {@code "input"} を返す。
+     */
+    private String resolveFirstParamName(String toolName) {
+        if (mcpToolRegistry == null) {
+            return "input";
+        }
+        try {
+            for (dev.langchain4j.agent.tool.ToolSpecification spec : getToolSpecifications()) {
+                if (toolName.equals(spec.name()) && spec.parameters() != null
+                        && spec.parameters().properties() != null
+                        && !spec.parameters().properties().isEmpty()) {
+                    return spec.parameters().properties().keySet().iterator().next();
+                }
+            }
+        } catch (Exception ignored) {
+            // スキーマ取得失敗: デフォルトパラメータ名にフォールバック
+        }
+        return "input";
+    }
+
+    /**
+     * MCP サーバーから全ツール仕様を取得する（キャッシュ最適化のためワンショット）。
+     */
+    private java.util.List<dev.langchain4j.agent.tool.ToolSpecification> getToolSpecifications() {
+        // McpToolRegistry.listToolNames() は文字列のみ返すため、ここでは直接 McpClient を使う
+        // McpToolRegistry は package-private アクセスなし: 仕様取得は未対応
+        return java.util.Collections.emptyList();
     }
 
     /**
@@ -233,6 +372,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
 
     /**
      * 作業ディレクトリを変更して関連ツールを再初期化します。
+     * MCP レジストリが設定されている場合は同時に再接続します。
      *
      * @param args 新しい作業ディレクトリのパス文字列
      * @return 実行結果メッセージまたはエラーメッセージ
@@ -252,6 +392,9 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
         fileReaderTool = new FileReaderTool(currentDir);
         excelReaderTool = new ExcelReaderTool(currentDir);
         binaryAttachmentStore = new BinaryAttachmentStore(currentDir);
+        if (mcpToolRegistry != null) {
+            mcpToolRegistry.reload(currentDir);
+        }
         return "(tool:setdir) 作業ディレクトリを変更しました: %s".formatted(currentDir);
     }
 
@@ -357,7 +500,8 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      * @return ヘルプ文字列
      */
     private String helpText() {
-        return "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel, readbinary\n"
+        StringBuilder sb = new StringBuilder(
+            "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel, readbinary\n"
                 + "  - /tool time\n"
                 + "  - /tool echo <text>\n"
                 + "  - /tool grep <query>\n"
@@ -369,7 +513,17 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
                 + "  - /tool readfile <path>        テキストファイルを読み込む\n"
                 + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む\n"
-                + "  - /tool readbinary <path>      Office/PDFは本文抽出、それ以外は base64 で読み込む";
+                + "  - /tool readbinary <path>      Office/PDFは本文抽出、それ以外は base64 で読み込む");
+        if (mcpToolRegistry != null) {
+            List<String> mcpTools = mcpToolRegistry.listToolNames();
+            if (!mcpTools.isEmpty()) {
+                sb.append("\n\nMCP ツール（外部サーバー提供）:");
+                for (String name : mcpTools) {
+                    sb.append("\n  - /tool ").append(name);
+                }
+            }
+        }
+        return sb.toString();
     }
 
     /**

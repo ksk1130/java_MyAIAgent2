@@ -1,6 +1,7 @@
 package jp.euks.myagent2.chat;
 
 import java.util.Objects;
+import jp.euks.myagent2.mcp.McpToolRegistry;
 import jp.euks.myagent2.tools.*;
 import java.nio.file.Path;
 import java.util.Map;
@@ -118,6 +119,7 @@ public final class ChatServiceFactory {
         }
         baseUrl = normalizeBaseUrl(baseUrl);
 
+        McpToolRegistry mcpRegistry = new McpToolRegistry(workDir);
         return new OpenAiCompatibleChatService(
                 baseUrl,
                 apiKey,
@@ -126,7 +128,8 @@ public final class ChatServiceFactory {
                 new GitLogTool(workDir),
                 new FileReaderTool(workDir),
                 new FileWriterTool(workDir),
-                new LocalCommandTool(workDir));
+                new LocalCommandTool(workDir),
+                mcpRegistry);
     }
 
     /**
@@ -143,6 +146,7 @@ public final class ChatServiceFactory {
 
         String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_GEMINI));
 
+        McpToolRegistry mcpRegistry = new McpToolRegistry(workDir);
         return new GeminiNativeChatService(
                 apiKey,
                 "gemini-2.0-flash",
@@ -151,7 +155,8 @@ public final class ChatServiceFactory {
                 new FileReaderTool(workDir),
                 new FileWriterTool(workDir),
                 new LocalCommandTool(workDir),
-                baseUrl);
+                baseUrl,
+                mcpRegistry);
     }
 
     /**
