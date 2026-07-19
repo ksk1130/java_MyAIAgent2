@@ -14,6 +14,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import jp.euks.myagent2.mcp.McpToolRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * `/tool` プレフィックス付きの手動ツールコマンドを解析して実行する既定実装。
@@ -26,6 +28,7 @@ import jp.euks.myagent2.mcp.McpToolRegistry;
 public class DefaultManualToolExecutor implements ManualToolExecutor {
     private static final String PREFIX = "/tool";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final Logger log = LoggerFactory.getLogger(DefaultManualToolExecutor.class);
 
     private final Clock clock;
     private Path currentDir;
@@ -198,7 +201,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 return "(tool:%s) %s".formatted(toolName, result);
             }
         } catch (Exception e) {
-            // MCP 実行失敗時は組み込みツールにフォールバックする
+            log.debug("MCP tool execution failed for '{}', falling back to built-in: {}", toolName, e.getMessage(), e);
         }
         return null;
     }
@@ -226,9 +229,9 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
 
     /**
      * ツール名と引数文字列から MCP に渡す引数マップを構築する。
-     * 引数文字列が JSON オブジェクトであればパースし、それ以外は単一パラメータとして扱う。
+     * 引数文字列が JSON オブジェクトであればパースし、それ以外は {@code "input"} キーで単一パラメータとして扱う。
      *
-     * @param toolName ツール名（MCP スキーマ参照用）
+     * @param toolName ツール名
      * @param args     コマンドライン引数文字列
      * @return MCP に渡す引数マップ
      */
@@ -244,46 +247,13 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 if (parsed != null) {
                     return parsed;
                 }
-            } catch (Exception ignored) {
-                // フォールバック: 文字列として扱う
+            } catch (Exception e) {
+                log.debug("Failed to parse args as JSON for tool '{}', treating as plain string: {}", toolName, e.getMessage());
             }
         }
-        // MCP サーバーのツールスキーマから最初のパラメータ名を取得して割り当てる
-        String paramName = resolveFirstParamName(toolName);
         Map<String, Object> argsMap = new LinkedHashMap<>();
-        argsMap.put(paramName, args);
+        argsMap.put("input", args);
         return argsMap;
-    }
-
-    /**
-     * MCP サーバーからツールスキーマを取得し、最初のパラメータ名を返す。
-     * 取得できない場合は {@code "input"} を返す。
-     */
-    private String resolveFirstParamName(String toolName) {
-        if (mcpToolRegistry == null) {
-            return "input";
-        }
-        try {
-            for (dev.langchain4j.agent.tool.ToolSpecification spec : getToolSpecifications()) {
-                if (toolName.equals(spec.name()) && spec.parameters() != null
-                        && spec.parameters().properties() != null
-                        && !spec.parameters().properties().isEmpty()) {
-                    return spec.parameters().properties().keySet().iterator().next();
-                }
-            }
-        } catch (Exception ignored) {
-            // スキーマ取得失敗: デフォルトパラメータ名にフォールバック
-        }
-        return "input";
-    }
-
-    /**
-     * MCP サーバーから全ツール仕様を取得する（キャッシュ最適化のためワンショット）。
-     */
-    private java.util.List<dev.langchain4j.agent.tool.ToolSpecification> getToolSpecifications() {
-        // McpToolRegistry.listToolNames() は文字列のみ返すため、ここでは直接 McpClient を使う
-        // McpToolRegistry は package-private アクセスなし: 仕様取得は未対応
-        return java.util.Collections.emptyList();
     }
 
     /**
