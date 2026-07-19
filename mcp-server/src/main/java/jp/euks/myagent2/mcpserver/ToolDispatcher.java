@@ -100,7 +100,7 @@ public class ToolDispatcher {
      */
     public ToolResult execute(String toolName, JsonObject arguments) {
         return switch (toolName) {
-            case "time" -> executeTıme();
+            case "time" -> executeTime();
             case "grep" -> executeGrep(arguments);
             case "gitlog" -> executeGitlog(arguments);
             case "gitshow" -> executeGitshow(arguments);
@@ -117,7 +117,7 @@ public class ToolDispatcher {
     // Tool implementations
     // ------------------------------------------------------------------
 
-    private ToolResult executeTıme() {
+    private ToolResult executeTime() {
         return ToolResult.ok(LocalDateTime.now().format(TIME_FORMATTER));
     }
 
