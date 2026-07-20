@@ -10,9 +10,6 @@ repositories {
 def langchain4jVersion = '1.17.2'
 
 dependencies {
-    // 既存ツール群を再利用
-    implementation project(':app')
-
     implementation 'com.google.code.gson:gson:2.11.0'
 
     // Apache POI (Excel 読み取りツール用)

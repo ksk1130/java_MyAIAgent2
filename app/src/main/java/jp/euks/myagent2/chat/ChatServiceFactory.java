@@ -106,6 +106,7 @@ public final class ChatServiceFactory {
 
     /**
      * OpenAI 用の ChatService を生成します。
+     * 内部実装は readbinary のみで、他のツールは MCP を通じて利用されます。
      */
     private static ChatService createOpenAiService(Map<String, String> env, Path workDir) {
         String apiKey = trimToEmpty(env.get(ENV_API_KEY_OPENAI));
@@ -120,23 +121,12 @@ public final class ChatServiceFactory {
         baseUrl = normalizeBaseUrl(baseUrl);
 
         McpToolRegistry mcpRegistry = new McpToolRegistry(workDir);
-        return new OpenAiCompatibleChatService(
-                baseUrl,
-                apiKey,
-                "gpt-4o-mini",
-                new WorkspaceGrepTool(workDir),
-                new GitLogTool(workDir),
-                new FileReaderTool(workDir),
-                new FileWriterTool(workDir),
-                new LocalCommandTool(workDir),
-                mcpRegistry);
+        return new OpenAiCompatibleChatService(baseUrl, apiKey, "gpt-4o-mini", mcpRegistry);
     }
 
     /**
      * Gemini 用の ChatService を生成します。
-     * LangChain4j のネイティブ GoogleAiGeminiChatModel を使用し、
-     * ツール統合とストリーミングに対応しています。
-     * カスタム baseUrl 設定も対応。
+     * 内部実装は readbinary のみで、他のツールは MCP を通じて利用されます。
      */
     private static ChatService createGeminiService(Map<String, String> env, Path workDir) {
         String apiKey = trimToEmpty(env.get(ENV_API_KEY_GEMINI));
@@ -147,16 +137,7 @@ public final class ChatServiceFactory {
         String baseUrl = trimToEmpty(env.get(ENV_BASE_URL_GEMINI));
 
         McpToolRegistry mcpRegistry = new McpToolRegistry(workDir);
-        return new GeminiNativeChatService(
-                apiKey,
-                "gemini-2.0-flash",
-                new WorkspaceGrepTool(workDir),
-                new GitLogTool(workDir),
-                new FileReaderTool(workDir),
-                new FileWriterTool(workDir),
-                new LocalCommandTool(workDir),
-                baseUrl,
-                mcpRegistry);
+        return new GeminiNativeChatService(apiKey, "gemini-2.0-flash", baseUrl, mcpRegistry);
     }
 
     /**

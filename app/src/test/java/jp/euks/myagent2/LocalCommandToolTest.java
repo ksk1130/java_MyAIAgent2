@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import org.junit.Test;
 import org.junit.Assume;
 
-import jp.euks.myagent2.tools.LocalCommandTool;
+import jp.euks.myagent2.mcpserver.tools.LocalCommandTool;
 
 /**
  * LocalCommandTool のテスト。

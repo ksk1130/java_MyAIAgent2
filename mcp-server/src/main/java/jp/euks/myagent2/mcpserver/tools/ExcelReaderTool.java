@@ -1,5 +1,6 @@
-package jp.euks.myagent2.tools;
-
+package jp.euks.myagent2.mcpserver.tools;
+
+
 
 import java.util.Objects;
 import java.io.InputStream;
@@ -230,5 +231,3 @@ public class ExcelReaderTool {
         return name.substring(dotIndex + 1);
     }
 }
-
-

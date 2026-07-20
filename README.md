@@ -3,8 +3,13 @@
 JavaFX で構築したデスクトップ向け AI チャットエージェントです。  
 OpenAI 互換エンドポイントに接続し、ツール呼び出し（検索・Git参照・ファイルI/O・ローカルコマンド）を安全制約付きで実行できます。  
 会話履歴の保存、システムプロンプト編集、ストリーミング表示にも対応しています。
-Office/PDF 等のバイナリ読込にも対応し、抽出可能な形式は本文テキストとして扱えます。  
+Office/PDF 等のバイナリ読込にも対応しています。  
 WebView で会話のHTMLプレビュー表示が可能で、セッション管理により複数の独立した会話を同時管理できます。
+
+現在はマルチモジュール構成です。
+
+- `app`: JavaFX UI / LangChain4j 連携 / セッション管理
+- `mcp-server`: MCP サーバー本体 / 各種ツール実装（grep, git, readfile, readexcel, writefile, localcmd など）
 
 ## 目次
 
@@ -52,7 +57,7 @@ java_MyAI Agent2 は、ローカル開発支援を目的としたデスクトッ
 
 - JavaFX ベースの軽量 GUI
 - OpenAI 互換 API への接続
-- LangChain4j 1.12.2 による効率的な Agent 実装
+- LangChain4j 1.17.2 による Agent 実装
 - ツール実行を伴う回答生成（Function Calling）
 - セッション管理による複数会話の並立
 - 会話履歴の永続化（JSON）
@@ -96,12 +101,13 @@ java_MyAI Agent2 は、ローカル開発支援を目的としたデスクトッ
 ## 技術スタック
 
 - 言語: Java 21
-- ビルド: Gradle
-- UI: JavaFX 21.0.3（controls / fxml / media / web）
-- LLM 連携: LangChain4j 1.12.2（`Assistant` インターフェース、`@Tool` アノテーション）
+- ビルド: Gradle（マルチモジュール: `app`, `mcp-server`）
+- UI: JavaFX 21.0.11（controls / fxml / media / web）
+- LLM 連携: LangChain4j 1.17.2（`Assistant` インターフェース、`@Tool` アノテーション）
 - Function Calling: OpenAI互換API の `tools` パラメータ対応
+- MCP: LangChain4j MCP クライアント + `mcp-server` モジュール
 - 会話履歴: `MessageWindowChatMemory` による自動管理
-- JSON: Gson 2.10.1
+- JSON: Gson 2.11.0
 - 文書抽出: Apache POI 5.4.1 / Apache Tika 2.9.2
 - ログ: Log4j2 2.24.3 + SLF4J
 - テスト: JUnit 4
@@ -126,7 +132,7 @@ java_MyAI Agent2 は、ローカル開発支援を目的としたデスクトッ
 4. 依存解決とビルドを実行
 
 ```bash
-gradlew :app:build
+gradlew build
 ```
 
 ## 起動方法
@@ -138,6 +144,12 @@ gradlew :app:run
 ```
 
 起動後、GUI 画面でチャットを開始できます。
+
+MCP サーバーを単体で起動する場合:
+
+```bash
+gradlew :mcp-server:run
+```
 
 ## addons ディレクトリ運用
 
@@ -230,7 +242,12 @@ gradlew :app:run
 
 ### LLM 自動実行（Function Calling）
 
-LLM が会話の中で以下のツールを自動的に判断して実行します（最大3ラウンド）:
+LLM が会話の中で以下のツールを自動的に判断して実行します（最大3ラウンド）。
+
+- `readbinary` は `app` の内部ツール（`@Tool`）として実行
+- それ以外の多くのツールは MCP 経由で `mcp-server` モジュール実装を実行
+
+主な自動実行対象:
 
 - `time` - システム時刻取得
 - `grep` - ワークスペース内検索
@@ -339,7 +356,7 @@ create-dist.bat
 ## テスト
 
 ```bash
-gradlew :app:test
+gradlew :app:test :mcp-server:test
 ```
 
 主な確認対象:
@@ -354,13 +371,19 @@ gradlew :app:test
 主要ディレクトリ:
 
 - `app/src/main/java`
-  - アプリ本体コード
+  - JavaFX UI / チャット制御 / LangChain4j 連携
 - `app/src/test/java`
-  - テストコード
+  - app モジュールのテスト
+- `mcp-server/src/main/java`
+  - MCP サーバー本体 / ツール実装
+- `mcp-server/src/test/java`
+  - mcp-server モジュールのテスト
 - `app/src/main/resources`
   - UI リソース
 - `app/build.gradle`
   - アプリ側ビルド設定
+- `mcp-server/build.gradle`
+  - MCP サーバー側ビルド設定
 - `create-dist.bat`
   - 配布物作成スクリプト
 
@@ -399,7 +422,7 @@ gradlew :app:test
 ## トラブルシューティング
 
 1. API キー未設定で LLM 応答にならない  
-   - `MYAGENT2_API_KEY` を設定してください。  
+  - `MYAGENT2_API_KEY_OPENAI` または `MYAGENT2_API_KEY_GEMINI` を設定してください。  
    - 未設定時はスタブ応答になります。
 
 2. ストリーミングが動作しない  
@@ -426,7 +449,7 @@ gradlew :app:test
 7. ビルド失敗  
    - まず以下を実行して再試行してください。  
    - `gradlew clean`  
-   - `gradlew :app:build`
+  - `gradlew build`
 
 ## ライセンス
 このプロジェクトはMITライセンスの下で公開されています。詳細はLICENSEファイルを参照してください。

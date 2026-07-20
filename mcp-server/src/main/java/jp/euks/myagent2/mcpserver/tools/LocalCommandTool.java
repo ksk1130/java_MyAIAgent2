@@ -1,4 +1,4 @@
-package jp.euks.myagent2.tools;
+package jp.euks.myagent2.mcpserver.tools;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

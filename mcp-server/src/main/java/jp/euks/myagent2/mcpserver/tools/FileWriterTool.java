@@ -1,4 +1,4 @@
-package jp.euks.myagent2.tools;
+package jp.euks.myagent2.mcpserver.tools;
 
 
 
@@ -109,6 +109,3 @@ public class FileWriterTool {
                 .replace("\\n", "\n");
     }
 }
-
-
-

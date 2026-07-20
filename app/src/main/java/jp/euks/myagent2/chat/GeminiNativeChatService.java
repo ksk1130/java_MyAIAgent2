@@ -38,7 +38,7 @@ public class GeminiNativeChatService implements ChatService {
 - `gitlog` / `gitshow` / `gitbranch` — Git の読み取り系操作（参照のみ）
 - `readfile` / `writefile` — ファイルの読み取り／書き込み
 - `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る
-- `readbinary` — Office/PDF は本文抽出テキストを返す
+- `readbinary` — 画像や文書をBase64エンコードして返す
 - `localcmd` — ローカルコマンド実行（許可制）
 """;
 
@@ -70,51 +70,15 @@ public class GeminiNativeChatService implements ChatService {
      * 最小限のコンストラクタ（ツールなし）。
      */
     public GeminiNativeChatService(String apiKey, String modelName) {
-        this(apiKey, modelName, null, null, null, null, null, null);
+        this(apiKey, modelName, null, null);
     }
 
     /**
-     * ツール付きコンストラクタ。
+     * baseUrl カスタマイズ対応のコンストラクタ。
      */
     public GeminiNativeChatService(
             String apiKey,
             String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            FileReaderTool fileReaderTool,
-            FileWriterTool fileWriterTool,
-            LocalCommandTool localCommandTool) {
-        this(apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, null);
-    }
-
-    /**
-     * 完全なコンストラクタ（baseUrl カスタマイズ対応）。
-     */
-    public GeminiNativeChatService(
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            FileReaderTool fileReaderTool,
-            FileWriterTool fileWriterTool,
-            LocalCommandTool localCommandTool,
-            String baseUrl) {
-        this(apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, baseUrl, null);
-    }
-
-    /**
-     * MCP レジストリ付き完全コンストラクタ。
-     * {@code mcpRegistry} が非 {@code null} かつ MCP サーバーが設定されている場合は、
-     * {@link AiServices} に {@link dev.langchain4j.mcp.McpToolProvider} を追加登録する。
-     */
-    public GeminiNativeChatService(
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            FileReaderTool fileReaderTool,
-            FileWriterTool fileWriterTool,
-            LocalCommandTool localCommandTool,
             String baseUrl,
             McpToolRegistry mcpRegistry) {
 
@@ -146,12 +110,6 @@ public class GeminiNativeChatService implements ChatService {
         this.workingDirectory = Path.of(System.getProperty("user.dir"));
 
         this.agentTools = new AgentTools(
-            grepTool,
-            gitTool,
-            fileReaderTool,
-            fileWriterTool,
-            localCommandTool,
-            new ExcelReaderTool(),
             new BinaryAttachmentStore(workingDirectory),
             toolExecutionTracker);
 

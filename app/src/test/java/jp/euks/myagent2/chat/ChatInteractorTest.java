@@ -441,43 +441,6 @@ public class ChatInteractorTest {
     }
 
     @Test
-    public void onUserMessageRetriesSummaryWhenReadbinaryOutputOnly() {
-        java.util.concurrent.atomic.AtomicInteger callCount = new java.util.concurrent.atomic.AtomicInteger();
-        ToolExecutionTracker tracker = new ToolExecutionTracker();
-        tracker.record(
-            "readbinary",
-            "Test.xlsx",
-            "file=Test.xlsx mime=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet size=87761 base64=AAAA");
-
-        ChatService service = new ChatService() {
-            @Override
-            public String replyTo(String userMessage) {
-                return "unused";
-            }
-
-            @Override
-            public String replyToWithHistory(List<ChatMessage> history, String userMessage) {
-                int n = callCount.incrementAndGet();
-                if (n == 1) {
-                    return "file=Test.xlsx mime=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet size=87761 base64=AAAA";
-                }
-                return "要約結果: 売上データは月次で増加傾向です。";
-            }
-
-            @Override
-            public ToolExecutionTracker getToolExecutionTracker() {
-                return tracker;
-            }
-        };
-
-        ChatInteractor interactor = new ChatInteractor(service, message -> java.util.Optional.empty());
-        String turn = interactor.onUserMessage("Test.xlsxを要約して");
-
-        assertEquals(2, callCount.get());
-        assertTrue(turn, turn.contains("要約結果: 売上データは月次で増加傾向です。"));
-    }
-
-    @Test
     public void binaryAttachmentStoreDoesNotCreateMyagent2Directory() throws Exception {
         Path tempDir = Files.createTempDirectory("attach-memory-only");
         Path sample = tempDir.resolve("test.png");

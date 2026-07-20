@@ -14,6 +14,12 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import jp.euks.myagent2.mcp.McpToolRegistry;
+import jp.euks.myagent2.mcpserver.tools.DocumentTextExtractor;
+import jp.euks.myagent2.mcpserver.tools.ExcelReaderTool;
+import jp.euks.myagent2.mcpserver.tools.FileReaderTool;
+import jp.euks.myagent2.mcpserver.tools.GitLogTool;
+import jp.euks.myagent2.mcpserver.tools.LocalCommandTool;
+import jp.euks.myagent2.mcpserver.tools.WorkspaceGrepTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -222,14 +228,13 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
             case "cmd" -> runCmd(args);
             case "readfile" -> runReadFile(args);
             case "readexcel" -> runReadExcel(args);
-            case "readbinary" -> runReadBinary(args);
             default -> "(tool:error) 未知のツールです: %s。`/tool help` を使ってください。".formatted(toolName);
         };
     }
 
     /**
      * ツール名と引数文字列から MCP に渡す引数マップを構築する。
-     * 引数文字列が JSON オブジェクトであればパースし、それ以外は {@code "input"} キーで単一パラメータとして扱う。
+     * 引数文字列が JSON オブジェクトであればパースし、それ以外はツール別に適切なパラメータ名にマッピングする。
      *
      * @param toolName ツール名
      * @param args     コマンドライン引数文字列
@@ -251,8 +256,42 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 log.debug("Failed to parse args as JSON for tool '{}', treating as plain string: {}", toolName, e.getMessage());
             }
         }
+        
+        // ツール別の引数マッピング
         Map<String, Object> argsMap = new LinkedHashMap<>();
-        argsMap.put("input", args);
+        switch (toolName) {
+            case "grep" -> argsMap.put("query", args);
+            case "gitshow" -> argsMap.put("ref", args);
+            case "readfile" -> argsMap.put("path", args);
+            case "readexcel" -> {
+                java.util.List<String> tokens = splitArgs(args);
+                if (tokens.size() >= 1) argsMap.put("path", tokens.get(0));
+                if (tokens.size() >= 2) argsMap.put("sheetName", tokens.get(1));
+                if (tokens.size() >= 3) argsMap.put("range", tokens.get(2));
+            }
+            case "writefile" -> {
+                java.util.List<String> tokens = splitArgs(args);
+                if (tokens.size() >= 1) argsMap.put("path", tokens.get(0));
+                if (tokens.size() >= 2) argsMap.put("content", String.join(" ", tokens.subList(1, tokens.size())));
+            }
+            case "localcmd" -> argsMap.put("command", args);
+            case "gitlog" -> {
+                // gitlog の引数を解析してマッピング
+                String author = extractGitOption(args, "author");
+                String after = extractGitOption(args, "after");
+                String before = extractGitOption(args, "before");
+                String file = args
+                        .replaceAll("--author(?:=|\\s+)\\S+", "")
+                        .replaceAll("--after(?:=|\\s+)\\S+", "")
+                        .replaceAll("--before(?:=|\\s+)\\S+", "")
+                        .trim();
+                if (!file.isEmpty()) argsMap.put("file", file);
+                if (!author.isEmpty()) argsMap.put("author", author);
+                if (!after.isEmpty()) argsMap.put("after", after);
+                if (!before.isEmpty()) argsMap.put("before", before);
+            }
+            default -> argsMap.put("input", args);  // フォールバック
+        }
         return argsMap;
     }
 
@@ -398,36 +437,6 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
     }
 
     /**
-     * バイナリ読み取りラッパー。
-     *
-     * @param args 引数文字列（path）
-     * @return base64 または抽出テキストを含む結果文字列、またはエラーメッセージ
-     */
-    private String runReadBinary(String args) {
-        java.util.List<String> tokens = splitArgs(args);
-        if (tokens.size() != 1) {
-            return "(tool:error) readbinary には <path> が必要です。例: /tool readbinary docs/sample.pdf";
-        }
-        try {
-            BinaryAttachmentStore.AttachmentMetadata metadata = binaryAttachmentStore.createAttachment(tokens.get(0));
-            String extractedText = buildExtractionSection(tokens.get(0));
-            if (!extractedText.isEmpty()) {
-                return "(tool:readbinary) file=%s mime=".formatted(metadata.filename()) + metadata.mimeType()
-                        + " size=%s extracted_text=\"".formatted(metadata.sizeBytes()) + extractedText.replace("\"", "'") + "\"";
-            }
-
-            var base64Opt = binaryAttachmentStore.getBase64(metadata.id());
-            if (base64Opt.isEmpty()) {
-                return "(tool:error) readbinary の base64 変換に失敗しました";
-            }
-            return "(tool:readbinary) file=%s mime=".formatted(metadata.filename()) + metadata.mimeType()
-                    + " size=%s base64=".formatted(metadata.sizeBytes()) + base64Opt.get();
-        } catch (IllegalArgumentException e) {
-            return "(tool:error) " + e.getMessage();
-        }
-    }
-
-    /**
      * Office ドキュメントや PDF のテキスト抽出セクションを構築します。
      * 
      * @param path ファイルパス
@@ -471,7 +480,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
      */
     private String helpText() {
         StringBuilder sb = new StringBuilder(
-            "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel, readbinary\n"
+            "(tool:help) 利用可能な手動ツール: time, echo, grep, gitlog, gitshow, gitbranch, cmd, setdir, getdir, readfile, readexcel\n"
                 + "  - /tool time\n"
                 + "  - /tool echo <text>\n"
                 + "  - /tool grep <query>\n"
@@ -482,8 +491,7 @@ public class DefaultManualToolExecutor implements ManualToolExecutor {
                 + "  - /tool setdir <path>          作業ディレクトリを変更する\n"
                 + "  - /tool getdir                 現在の作業ディレクトリを表示する\n"
                 + "  - /tool readfile <path>        テキストファイルを読み込む\n"
-                + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む\n"
-                + "  - /tool readbinary <path>      Office/PDFは本文抽出、それ以外は base64 で読み込む");
+                + "  - /tool readexcel <file> <sheet> <range>  Excel 範囲を読み込む");
         if (mcpToolRegistry != null) {
             List<String> mcpTools = mcpToolRegistry.listToolNames();
             if (!mcpTools.isEmpty()) {

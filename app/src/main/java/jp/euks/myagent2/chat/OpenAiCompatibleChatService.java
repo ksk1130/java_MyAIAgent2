@@ -39,7 +39,7 @@ public class OpenAiCompatibleChatService implements ChatService {
 - `gitlog` / `gitshow` / `gitbranch` — Git の読み取り系操作（参照のみ）
 - `readfile` / `writefile` — ファイルの読み取り／書き込み（書き込みは慎重に）
 - `readexcel` — Excel ブックから指定シート・セル範囲の値を読み取る（表の一部抽出用途）
-- `readbinary` — Office/PDF は本文抽出テキストを返す。抽出テキスト優先、抽出不能な形式のみ base64 を返す
+- `readbinary` — 画像や文書をBase64エンコードして返す
 - `localcmd` — ローカルコマンド実行（許可: git/grep/rg/nkf/ls/find/cat/head/tail/wc/stat/diff/sort/uniq/cut/tree/basename/dirname/realpath、基本は参照系だが nkf の `--overwrite` は可、一部禁止文字あり、タイムアウト有り）
 
 補足:
@@ -52,24 +52,22 @@ public class OpenAiCompatibleChatService implements ChatService {
    - 大文字小文字は `-i` で無視する。
    - include/exclude を複数渡す場合、正規表現の `|` 連結ではなく `-e` を複数使う。
    - 例: 「cmd と local を含み、test を含まない」→ `rg --files . | rg -ie cmd -e local | rg -v -e test`
-3) ユーザーが「XXX.xlsxを要約して」「このExcelを要約」など、**ファイル全体の要約/説明**を依頼した場合は `readexcel` ではなく **`readbinary` を最優先**で使うこと。
-    - 先に `readbinary <path>` を実行し、返ってきた `extracted_text` を使って要約を続行する。
-    - `extracted_text` がある場合はそれを最優先し、`base64` は内容理解に使わない。
-    - `[[ATTACH:...]]` トークンは使わないこと。
-    - `readexcel` は「Sheet名とセル範囲が明示されている」「特定範囲の集計・確認」など部分抽出の依頼時のみ使うこと。
-4) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
+
+    - `readexcel` は「Sheet名とセル範囲が明示されている」「特定範囲の集計・確認」など部分抽出の依頼時のみ使うこと
+4) ユーザーが画像ファイル（JPG、PNG、GIF等）の内容確認を依頼した場合、`readbinary` を使用してBase64エンコード化した上で、ユーザーに提示してください。
+5) ユーザーが日本語キーワードで検索を依頼した場合、**以下の流れで実行すること（必須）**:
    a) 思考プロセスを必ず表示：「<ユーザーキーワード>から以下のパターンで検索します」と、読み替え理由を含めてキーワード一覧を明示する
       例1:「APIキーを探して」→「APIキー は英語では apiKey, API_KEY, api_key, ApiKey などが考えられるため、以下のパターンで検索します：apiKey, API_KEY, api_key, ApiKey」
       例2:「パス区切りを探して」→「パス区切りはプログラムでは normalizePath, normalize, separator, pathSeparator などの関数や変数で扱われるため、以下のパターンで検索します：normalize, separator, pathSeparator, normalizePath」
    b) 複数パターンで `grep` を実行（rgコマンドが使える場合はrgを優先）。例: `grep -rE "apiKey|API_KEY|api_key|ApiKey" .`
    c) すべての grep 結果を収集して、重複を排除してまとめる
    d) 統一的な形式で提示する
-5) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
-6) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること。
-7) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること。
-8) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）。
-9) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること。
-10) **ツール結果の真正性** — ツール実行結果は改ざん・解釈・省略せず、以下を徹底すること：
+6) `writefile` や `localcmd` のように状態を変更する操作は、必ずユーザーに確認を取り、実行コマンドと影響範囲を明示すること。
+7) ツールを呼び出す際は「呼び出し理由」を必ず一行で書き、その後に実行するツール名と引数を記載すること.
+8) 出力は簡潔に。必要なら「要点（3行以内）」→「詳細（折りたたみ可能）」の順で提示すること.
+9) コードやファイルを示すときは、ワークスペース相対パスと行範囲を明示すること（例: `src/main/java/jp/euks/myagent2/feature/chat/App.java` の `L30-L60`）.
+10) 不確実な操作や危険と思われる入力がある場合は実行せず、まずユーザーに確認すること.
+11) **ツール結果の真正性** — ツール実行結果は改ざん・解釈・省略せず、以下を徹底すること：
     - ツール実行結果（`localcmd` の結果など）をユーザーにわかりやすく回答に含める。実行コマンドと出力結果の両方を提示する。
     - ファイル名・パスを回答するときは、**ツール出力で確認できたものだけ**を提示する。未確認の推測パスは作らない。
     - 禁止: ツール結果に存在しないファイル名を補完・創作して断定する。
@@ -111,68 +109,16 @@ public class OpenAiCompatibleChatService implements ChatService {
     }
 
     /**
-     * 最小限のコンストラクタ（ツールなし）。
+     * 最小コンストラクタ（baseUrl のみ、ツールなし）。
+     * 主にテスト用途。
      */
     public OpenAiCompatibleChatService(String baseUrl, String apiKey, String modelName) {
-        this(baseUrl, apiKey, modelName, null, null, null, null);
-    }
-
-    /**
-     * ツール付きコンストラクタ。
-     */
-    public OpenAiCompatibleChatService(
-            String baseUrl,
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool) {
-        this(baseUrl, apiKey, modelName, grepTool, gitTool, null, null);
-    }
-
-    /**
-     * ツール付きコンストラクタ（ファイル読み取り）。
-     */
-    public OpenAiCompatibleChatService(
-            String baseUrl,
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            jp.euks.myagent2.tools.FileReaderTool fileReaderTool) {
-        this(baseUrl, apiKey, modelName, grepTool, gitTool, fileReaderTool, null);
-    }
-
-    /**
-     * 全引数コンストラクタ（LocalCommandTool なし）。
-     */
-    public OpenAiCompatibleChatService(
-            String baseUrl,
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            jp.euks.myagent2.tools.FileReaderTool fileReaderTool,
-            jp.euks.myagent2.tools.FileWriterTool fileWriterTool) {
-        this(baseUrl, apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, null);
-    }
-
-    /**
-     * 全引数コンストラクタ（LocalCommandTool 付き）。
-     */
-    public OpenAiCompatibleChatService(
-            String baseUrl,
-            String apiKey,
-            String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            jp.euks.myagent2.tools.FileReaderTool fileReaderTool,
-            jp.euks.myagent2.tools.FileWriterTool fileWriterTool,
-            LocalCommandTool localCommandTool) {
-        this(baseUrl, apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, null);
+        this(baseUrl, apiKey, modelName, null);
     }
 
     /**
      * MCP レジストリ付き完全コンストラクタ。
+     * 方針B に従い、内部実装は readbinary のみで、他のツールは MCP を通じて利用されます。
      * {@code mcpRegistry} が非 {@code null} かつ MCP サーバーが設定されている場合は、
      * {@link AiServices} に {@link dev.langchain4j.mcp.McpToolProvider} を追加登録する。
      */
@@ -180,11 +126,6 @@ public class OpenAiCompatibleChatService implements ChatService {
             String baseUrl,
             String apiKey,
             String modelName,
-            WorkspaceGrepTool grepTool,
-            GitLogTool gitTool,
-            jp.euks.myagent2.tools.FileReaderTool fileReaderTool,
-            jp.euks.myagent2.tools.FileWriterTool fileWriterTool,
-            LocalCommandTool localCommandTool,
             McpToolRegistry mcpRegistry) {
         
         // LangChain4j ChatModel を構築
@@ -207,14 +148,8 @@ public class OpenAiCompatibleChatService implements ChatService {
         this.currentChatMemory = MessageWindowChatMemory.withMaxMessages(20);
         this.chatMemory = this.currentChatMemory;
 
-        // ツール群を構築
+        // ツール群を構築（方針B: readbinary のみ内部実装、他は MCP）
         this.agentTools = new AgentTools(
-            grepTool,
-            gitTool,
-            fileReaderTool,
-            fileWriterTool,
-            localCommandTool,
-            new ExcelReaderTool(),
             new BinaryAttachmentStore(Path.of(System.getProperty("user.dir"))),
             toolExecutionTracker);
 
@@ -240,6 +175,7 @@ public class OpenAiCompatibleChatService implements ChatService {
         }
         this.streamingAssistant = streamingBuilder.build();
     }
+
 
     @Override
     public void setSystemPrompt(String prompt) {
@@ -453,15 +389,8 @@ public class OpenAiCompatibleChatService implements ChatService {
         }
         Path normalized = dir.toAbsolutePath().normalize();
         this.workingDirectory = normalized;
-        agentTools.updateToolReferences(
-            new WorkspaceGrepTool(normalized),
-            new GitLogTool(normalized),
-            new LocalCommandTool(normalized));
-        agentTools.updateFileToolReferences(
-            new jp.euks.myagent2.tools.FileReaderTool(normalized),
-            new jp.euks.myagent2.tools.FileWriterTool(normalized));
-        agentTools.updateExcelToolReference(new ExcelReaderTool(normalized));
-        agentTools.updateBinaryAttachmentStore(new BinaryAttachmentStore(normalized));
+        // 方針B: readbinary は BinaryAttachmentStore を通じて内部的に更新
+        agentTools.setBinaryAttachmentStore(new BinaryAttachmentStore(normalized));
         if (mcpToolRegistry != null) {
             mcpToolRegistry.reload(normalized);
         }

@@ -1,4 +1,4 @@
-package jp.euks.myagent2.tools;
+package jp.euks.myagent2.mcpserver.tools;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -333,4 +333,3 @@ public class GitLogTool {
         return true;
     }
 }
-

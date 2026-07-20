@@ -3,9 +3,13 @@ package jp.euks.myagent2.chat;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import java.util.Objects;
-import jp.euks.myagent2.tools.*;
+import jp.euks.myagent2.mcpserver.*;
 import jp.euks.myagent2.common.*;
 import jp.euks.myagent2.session.*;
+import jp.euks.myagent2.tools.BinaryAttachmentStore;
+import jp.euks.myagent2.tools.DefaultManualToolExecutor;
+import jp.euks.myagent2.tools.ManualToolExecutor;
+import jp.euks.myagent2.tools.ToolExecutionTracker;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -214,7 +218,6 @@ public class ChatInteractor {
         java.util.List<String> toolNames = new java.util.ArrayList<>();
         if (tracker != null) {
             var executions = tracker.getExecutions();
-            baseAssistantMessage = ensureSummaryAfterReadbinary(userMessage, baseAssistantMessage, executions);
             if (!executions.isEmpty()) {
                 for (var exec : executions) {
                     toolNames.add(exec.toolName());
@@ -412,7 +415,6 @@ public class ChatInteractor {
                         java.util.List<String> toolNames = new java.util.ArrayList<>();
                         if (tracker != null) {
                             var executions = tracker.getExecutions();
-                            finalLlmText = ensureSummaryAfterReadbinary(userMessage, finalLlmText, executions);
                             finalLlmText = guardAssistantResponse(userMessage, finalLlmText);
                             if (!finalLlmText.equals(fullLlmText)) {
                                 onToken.accept("\n" + finalLlmText);
@@ -921,81 +923,6 @@ public class ChatInteractor {
             return "(error) 要約結果の生成に失敗しました。もう一度お試しください。";
         }
         return retried;
-    }
-
-    /**
-     * ユーザーメッセージが要約要求の可能性が高く、かつアシスタントメッセージがツール結果のみで構成されている場合、
-     * readbinary の結果を要約するよう LLM に再生成を促す。
-     * そうでない場合は元のアシスタントメッセージを返す。
-     *
-     * @param userMessage      ユーザーメッセージ
-     * @param assistantMessage アシスタントメッセージ
-     * @param executions       ツール実行履歴
-     * @return 要約結果または元のアシスタントメッセージ
-     */
-    private String ensureSummaryAfterReadbinary(
-            String userMessage,
-            String assistantMessage,
-            List<ToolExecutionTracker.ToolExecution> executions) {
-        if (assistantMessage == null || assistantMessage.isBlank()) {
-            return assistantMessage;
-        }
-        if (!isLikelySummaryRequest(userMessage)) {
-            return assistantMessage;
-        }
-        boolean hasReadbinary = executions != null
-                && executions.stream().anyMatch(exec -> "readbinary".equals(exec.toolName()));
-        if (!hasReadbinary) {
-            return assistantMessage;
-        }
-        if (!looksLikeToolPayloadOnly(assistantMessage)) {
-            return assistantMessage;
-        }
-
-        String readbinaryResults = executions.stream()
-                .filter(exec -> "readbinary".equals(exec.toolName()))
-                .map(ToolExecutionTracker.ToolExecution::result)
-                .collect(Collectors.joining("\n\n"));
-
-        String retryPrompt = "次の readbinary 結果を使って、ユーザー要求に対する最終回答を日本語で作成してください。"
-                + "\n制約: base64 文字列や tool の生出力はそのまま表示しない。要点を簡潔にまとめる。"
-                + "\n\nユーザー要求:\n%s\n\nreadbinary結果:\n".formatted(userMessage) + readbinaryResults;
-
-        String retried = chatService.replyToWithHistory(conversationHistory, retryPrompt);
-        if (retried == null || retried.isBlank()) {
-            return assistantMessage;
-        }
-        return retried;
-    }
-
-    /**
-     * ユーザーメッセージが要約要求の可能性が高いかどうかを判定するユーティリティ。
-     * 
-     * @param userMessage ユーザーメッセージ
-     * @return 要約要求の可能性が高い場合は true、そうでない場合は false
-     */
-    private static boolean isLikelySummaryRequest(String userMessage) {
-        if (Objects.isNull(userMessage)) {
-            return false;
-        }
-        return userMessage.contains("要約")
-                || userMessage.contains("まとめ")
-                || userMessage.contains("説明");
-    }
-
-    /**
-     * アシスタントメッセージがツール結果のみで構成されているように見えるかどうかを判定するユーティリティ。
-     * 
-     * @param assistantMessage アシスタントメッセージ
-     * @return ツール結果のみで構成されているように見える
-     */
-    private static boolean looksLikeToolPayloadOnly(String assistantMessage) {
-        String text = assistantMessage.trim();
-        return text.startsWith("(tool:readbinary)")
-                || text.contains("base64=")
-                || text.contains("attachmentId=")
-                || text.startsWith("file=")
-                || ASSISTANT_ATTACHMENT_TOKEN_PATTERN.matcher(text).find();
     }
 
     /**
