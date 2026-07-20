@@ -1,0 +1,59 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def langchain4jVersion = '1.17.2'
+
+dependencies {
+    // 既存ツール群を再利用
+    implementation project(':app')
+
+    implementation 'com.google.code.gson:gson:2.11.0'
+
+    // Apache POI (Excel 読み取りツール用)
+    implementation 'org.apache.poi:poi-ooxml:5.4.1'
+    implementation 'org.apache.tika:tika-core:2.9.2'
+    implementation 'org.apache.tika:tika-parsers-standard-package:2.9.2'
+
+    // ロギング
+    implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:2.24.3'
+    implementation 'org.apache.logging.log4j:log4j-core:2.24.3'
+    implementation 'org.apache.logging.log4j:log4j-api:2.24.3'
+
+    testImplementation libs.junit
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+application {
+    mainClass = 'jp.euks.myagent2.mcpserver.McpServerMain'
+}
+
+// 依存 JAR を含む Fat JAR を生成する
+jar {
+    archiveBaseName = 'mcp-server'
+    manifest {
+        attributes 'Main-Class': 'jp.euks.myagent2.mcpserver.McpServerMain'
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // JAR 署名ファイルを除外（Fat JAR での SecurityException を防ぐ）
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}

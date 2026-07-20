@@ -11,6 +11,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
+import jp.euks.myagent2.mcp.McpToolRegistry;
 import jp.euks.myagent2.tools.*;
 import java.nio.file.Path;
 import java.util.List;
@@ -63,6 +64,7 @@ public class GeminiNativeChatService implements ChatService {
     private volatile String systemPrompt = DEFAULT_SYSTEM_PROMPT;
     private volatile Path workingDirectory;
     private volatile MessageWindowChatMemory currentChatMemory;
+    private final McpToolRegistry mcpToolRegistry;
 
     /**
      * 最小限のコンストラクタ（ツールなし）。
@@ -97,6 +99,24 @@ public class GeminiNativeChatService implements ChatService {
             FileWriterTool fileWriterTool,
             LocalCommandTool localCommandTool,
             String baseUrl) {
+        this(apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, baseUrl, null);
+    }
+
+    /**
+     * MCP レジストリ付き完全コンストラクタ。
+     * {@code mcpRegistry} が非 {@code null} かつ MCP サーバーが設定されている場合は、
+     * {@link AiServices} に {@link dev.langchain4j.mcp.McpToolProvider} を追加登録する。
+     */
+    public GeminiNativeChatService(
+            String apiKey,
+            String modelName,
+            WorkspaceGrepTool grepTool,
+            GitLogTool gitTool,
+            FileReaderTool fileReaderTool,
+            FileWriterTool fileWriterTool,
+            LocalCommandTool localCommandTool,
+            String baseUrl,
+            McpToolRegistry mcpRegistry) {
 
         // Gemini Native API を直接使用（OpenAI互換レイヤーなし）
         var chatModelBuilder = GoogleAiGeminiChatModel.builder()
@@ -135,17 +155,25 @@ public class GeminiNativeChatService implements ChatService {
             new BinaryAttachmentStore(workingDirectory),
             toolExecutionTracker);
 
-        this.assistant = AiServices.builder(Assistant.class)
+        this.mcpToolRegistry = mcpRegistry;
+
+        var assistantBuilder = AiServices.builder(Assistant.class)
             .chatModel(chatModel)
             .chatMemory(chatMemory)
-            .tools(agentTools)
-            .build();
+            .tools(agentTools);
+        if (mcpRegistry != null && mcpRegistry.getToolProvider() != null) {
+            assistantBuilder.toolProvider(mcpRegistry.getToolProvider());
+        }
+        this.assistant = assistantBuilder.build();
 
-        this.streamingAssistant = AiServices.builder(StreamingAssistant.class)
+        var streamingBuilder = AiServices.builder(StreamingAssistant.class)
             .streamingChatModel(streamingChatModel)
             .chatMemory(chatMemory)
-            .tools(agentTools)
-            .build();
+            .tools(agentTools);
+        if (mcpRegistry != null && mcpRegistry.getToolProvider() != null) {
+            streamingBuilder.toolProvider(mcpRegistry.getToolProvider());
+        }
+        this.streamingAssistant = streamingBuilder.build();
     }
 
     @Override
@@ -239,6 +267,14 @@ public class GeminiNativeChatService implements ChatService {
         if (!Objects.isNull(dir)) {
             this.workingDirectory = dir;
         }
+        if (mcpToolRegistry != null && dir != null) {
+            mcpToolRegistry.reload(dir.toAbsolutePath().normalize());
+        }
+    }
+
+    @Override
+    public McpToolRegistry getMcpToolRegistry() {
+        return mcpToolRegistry;
     }
 
     @Override

@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Consumer;
 
+import jp.euks.myagent2.mcp.McpToolRegistry;
 import jp.euks.myagent2.tools.*;
 
 /**
@@ -160,5 +161,15 @@ public interface ChatService {
      * @param history 復元したい会話履歴
      */
     default void restoreMemory(List<ChatMessage> history) {
+    }
+
+    /**
+     * この ChatService に関連する {@link McpToolRegistry} を返す。
+     * MCP 統合が設定されていない場合は {@code null} を返す。
+     *
+     * @return {@link McpToolRegistry}、または未設定時は {@code null}
+     */
+    default McpToolRegistry getMcpToolRegistry() {
+        return null;
     }
 }

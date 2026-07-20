@@ -1,0 +1,27 @@
+{
+  "servers": [
+    {
+      "name": "java-myagent-tools",
+      "type": "stdio",
+      "command": ["java", "-jar", "mcp-server/build/libs/mcp-server.jar", "--workdir", "."],
+      "env": {},
+      "enabled": false,
+      "_comment": "このアプリ自身の MCP サーバー。'gradlew :mcp-server:jar' でビルド後、enabled を true にしてください。--workdir にワークスペースパスを指定します。"
+    },
+    {
+      "name": "example-filesystem",
+      "type": "stdio",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
+      "env": {},
+      "enabled": false,
+      "_comment": "サードパーティ MCP サーバーの例。enabled を true にして起動コマンドを設定してください。"
+    },
+    {
+      "name": "example-http",
+      "type": "http",
+      "url": "http://localhost:3000/sse",
+      "enabled": false,
+      "_comment": "HTTP/SSE トランスポートの例。enabled を true にして url を設定してください。"
+    }
+  ]
+}

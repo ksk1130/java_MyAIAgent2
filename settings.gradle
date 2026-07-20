@@ -12,3 +12,4 @@ plugins {
 
 rootProject.name = 'java_MyAIAgent2'
 include('app')
+include('mcp-server')

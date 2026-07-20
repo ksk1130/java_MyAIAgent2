@@ -14,6 +14,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
+import jp.euks.myagent2.mcp.McpToolRegistry;
 import jp.euks.myagent2.tools.*;
 import java.nio.file.Path;
 import java.util.List;
@@ -91,6 +92,7 @@ public class OpenAiCompatibleChatService implements ChatService {
     private final ToolExecutionTracker toolExecutionTracker = new ToolExecutionTracker();
     private volatile Path workingDirectory;
     private volatile MessageWindowChatMemory currentChatMemory;
+    private final McpToolRegistry mcpToolRegistry;
 
     /**
      * アシスタント用の簡単なインターフェース。
@@ -166,6 +168,24 @@ public class OpenAiCompatibleChatService implements ChatService {
             jp.euks.myagent2.tools.FileReaderTool fileReaderTool,
             jp.euks.myagent2.tools.FileWriterTool fileWriterTool,
             LocalCommandTool localCommandTool) {
+        this(baseUrl, apiKey, modelName, grepTool, gitTool, fileReaderTool, fileWriterTool, localCommandTool, null);
+    }
+
+    /**
+     * MCP レジストリ付き完全コンストラクタ。
+     * {@code mcpRegistry} が非 {@code null} かつ MCP サーバーが設定されている場合は、
+     * {@link AiServices} に {@link dev.langchain4j.mcp.McpToolProvider} を追加登録する。
+     */
+    public OpenAiCompatibleChatService(
+            String baseUrl,
+            String apiKey,
+            String modelName,
+            WorkspaceGrepTool grepTool,
+            GitLogTool gitTool,
+            jp.euks.myagent2.tools.FileReaderTool fileReaderTool,
+            jp.euks.myagent2.tools.FileWriterTool fileWriterTool,
+            LocalCommandTool localCommandTool,
+            McpToolRegistry mcpRegistry) {
         
         // LangChain4j ChatModel を構築
         ChatModel chatModel = OpenAiChatModel.builder()
@@ -198,20 +218,27 @@ public class OpenAiCompatibleChatService implements ChatService {
             new BinaryAttachmentStore(Path.of(System.getProperty("user.dir"))),
             toolExecutionTracker);
 
+        this.mcpToolRegistry = mcpRegistry;
+
         // AiServices で Assistant インターフェース実装を生成
-        // ツールは自動的に Function Calling として登録される
-        this.assistant = AiServices.builder(Assistant.class)
+        var assistantBuilder = AiServices.builder(Assistant.class)
             .chatModel(chatModel)
             .chatMemory(chatMemory)
-            .tools(agentTools)
-            .build();
+            .tools(agentTools);
+        if (mcpRegistry != null && mcpRegistry.getToolProvider() != null) {
+            assistantBuilder.toolProvider(mcpRegistry.getToolProvider());
+        }
+        this.assistant = assistantBuilder.build();
 
         // AiServices でストリーミング用 StreamingAssistant を生成（同じメモリ・ツールを共有）
-        this.streamingAssistant = AiServices.builder(StreamingAssistant.class)
+        var streamingBuilder = AiServices.builder(StreamingAssistant.class)
             .streamingChatModel(streamingChatModel)
             .chatMemory(chatMemory)
-            .tools(agentTools)
-            .build();
+            .tools(agentTools);
+        if (mcpRegistry != null && mcpRegistry.getToolProvider() != null) {
+            streamingBuilder.toolProvider(mcpRegistry.getToolProvider());
+        }
+        this.streamingAssistant = streamingBuilder.build();
     }
 
     @Override
@@ -435,6 +462,14 @@ public class OpenAiCompatibleChatService implements ChatService {
             new jp.euks.myagent2.tools.FileWriterTool(normalized));
         agentTools.updateExcelToolReference(new ExcelReaderTool(normalized));
         agentTools.updateBinaryAttachmentStore(new BinaryAttachmentStore(normalized));
+        if (mcpToolRegistry != null) {
+            mcpToolRegistry.reload(normalized);
+        }
+    }
+
+    @Override
+    public McpToolRegistry getMcpToolRegistry() {
+        return mcpToolRegistry;
     }
 
     @Override
